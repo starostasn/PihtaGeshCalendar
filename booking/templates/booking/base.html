@@ -16,6 +16,7 @@
     <a href="{% url 'calendar' %}" class="{% if u == 'calendar' %}active{% endif %}">Календарь</a>
     <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}">Брони</a>
     <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}">Цены</a>
+    <a href="{% url 'stats' %}" class="{% if u == 'stats' %}active{% endif %}">Статистика</a>
     <a href="{% url 'channels' %}" class="{% if u == 'channels' or u == 'channel_edit' or u == 'channel_create' %}active{% endif %}">Площадки</a>
     {% endwith %}
     <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" title="Выйти">Выйти</button></form>

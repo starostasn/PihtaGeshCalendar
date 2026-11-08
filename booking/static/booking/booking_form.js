@@ -32,6 +32,13 @@
     const kind = form.querySelector("[name=kind]:checked");
     const isBlock = kind && kind.value === "block";
     form.querySelectorAll(".booking-only").forEach((el) => { el.hidden = isBlock; });
+    // Закрытые даты не бывают заявкой
+    const req = form.querySelector(".seg-request");
+    if (req) {
+      req.hidden = isBlock;
+      const input = req.querySelector("input");
+      if (isBlock && input.checked) form.querySelector(".seg-confirmed input").checked = true;
+    }
   }
 
   ci.addEventListener("change", () => {

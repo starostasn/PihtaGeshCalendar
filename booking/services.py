@@ -28,7 +28,7 @@ def save_booking(booking: Booking) -> Booking:
     никто (например, фоновая синхронизация) не успеет вставить пересекающуюся бронь.
     """
     with transaction.atomic():
-        if booking.status == Booking.Status.ACTIVE:
+        if booking.status != Booking.Status.CANCELLED:
             conflicts = find_overlaps(booking.check_in, booking.check_out, exclude_pk=booking.pk)
             if conflicts:
                 raise OverlapError(conflicts)

@@ -35,7 +35,8 @@ def build_export(channel: Channel | None = None) -> bytes:
     cal.add("method", "PUBLISH")
 
     today = timezone.localdate()
-    qs = Booking.objects.active().filter(check_out__gte=today - timedelta(days=EXPORT_PAST_DAYS))
+    # Заявки на площадки не отдаём: даты закрываются только подтверждёнными бронями.
+    qs = Booking.objects.confirmed().filter(check_out__gte=today - timedelta(days=EXPORT_PAST_DAYS))
     if channel is not None:
         qs = qs.exclude(channel=channel, external_uid__gt="")
 
@@ -141,6 +142,10 @@ def _fmt(b: Booking) -> str:
     return f"{b.check_in:%d.%m}–{b.check_out:%d.%m.%Y} ({b.nights} н.)"
 
 
+def _label(b: Booking) -> str:
+    return f"{b.source_name}{' (заявка)' if b.is_request else ''} {_fmt(b)}"
+
+
 def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
     """Приводит импортированные брони площадки в соответствие с её календарём."""
     result = SyncResult()
@@ -151,7 +156,7 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
     with transaction.atomic():
         imported = {b.external_uid: b for b in Booking.objects.filter(channel=channel).exclude(external_uid="")}
         current = [
-            b for b in imported.values() if b.status == Booking.Status.ACTIVE and b.check_out > today
+            b for b in imported.values() if b.status == Booking.Status.CONFIRMED and b.check_out > today
         ]
 
         if not relevant and len(current) >= 2:
@@ -194,11 +199,11 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
             changed = (
                 booking.check_in != ev.start
                 or booking.check_out != ev.end
-                or booking.status != Booking.Status.ACTIVE
+                or booking.status != Booking.Status.CONFIRMED
             )
             if changed:
                 booking.check_in, booking.check_out = ev.start, ev.end
-                booking.status = Booking.Status.ACTIVE
+                booking.status = Booking.Status.CONFIRMED
                 booking.cancel_reason = ""
                 booking.external_summary = ev.summary[:500]
                 booking.save()
@@ -219,7 +224,7 @@ def _conflict_warnings(touched: list[Booking]) -> list[str]:
     lines = []
     for a, b in conflict_pairs():
         if a.pk in touched_ids or b.pk in touched_ids:
-            line = f"⚠️ ДВОЙНАЯ БРОНЬ: {a.source_name} {_fmt(a)} и {b.source_name} {_fmt(b)}"
+            line = f"⚠️ ДВОЙНАЯ БРОНЬ: {_label(a)} и {_label(b)}"
             if is_possible_echo(a, b):
                 line += " — даты совпадают полностью, возможно, это площадка вернула вашу же бронь"
             lines.append(line)

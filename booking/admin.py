@@ -1,11 +1,17 @@
 from django.contrib import admin
 
-from .models import Booking, Channel, House, PriceRule, SyncLog
+from .models import Booking, Channel, House, Payment, PriceRule, SyncLog
+
+
+class PaymentInline(admin.TabularInline):
+    model = Payment
+    extra = 0
 
 
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ("check_in", "check_out", "kind", "status", "channel", "guest_name", "total_price", "prepaid")
+    list_display = ("check_in", "check_out", "kind", "status", "channel", "guest_name", "total_price")
+    inlines = [PaymentInline]
     list_filter = ("status", "kind", "channel")
     search_fields = ("guest_name", "phone", "comment", "external_summary")
     date_hierarchy = "check_in"

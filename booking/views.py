@@ -13,11 +13,12 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
-from .forms import BookingForm, ChannelForm, HouseForm, PeriodPriceForm, PriceRuleForm
+from .forms import BookingForm, ChannelForm, HouseForm, PaymentForm, PeriodPriceForm, PriceRuleForm
 from .ical import build_export, sync_channel
-from .models import Booking, Channel, House, PriceRule, SyncLog
+from .models import Booking, Channel, House, Payment, PriceRule, SyncLog
 from .pricing import PriceCalculator
-from .services import OverlapError, cancel_booking, conflict_pairs, is_possible_echo, save_booking
+from .services import OverlapError, conflict_pairs, is_possible_echo, save_booking
+from .stats import PRESETS, build_dashboard, resolve_period
 
 MONTH_NAMES = [
     "",
@@ -121,7 +122,11 @@ def calendar_view(request):
     months = [_build_month(*_add_months(y, m, i), bookings, calc, today) for i in range(months_count)]
 
     upcoming = (
-        Booking.objects.active().filter(check_out__gte=today).select_related("channel").order_by("check_in")[:20]
+        Booking.objects.active()
+        .filter(check_out__gte=today)
+        .select_related("channel")
+        .prefetch_related("payments")
+        .order_by("check_in")[:20]
     )
     conflicts = [(a, b, is_possible_echo(a, b)) for a, b in conflict_pairs()]
     failing = Channel.objects.filter(is_active=True, last_sync_ok=False)
@@ -146,10 +151,10 @@ def calendar_view(request):
 # ---------------------------------------------------------------- брони
 
 
-def _booking_form_view(request, booking: Booking | None):
+def _booking_form_view(request, booking: Booking | None, payment_form: PaymentForm | None = None):
     house = House.get()
     is_new = booking is None
-    if request.method == "POST":
+    if request.method == "POST" and payment_form is None:
         form = BookingForm(request.POST, instance=booking)
         if form.is_valid():
             obj = form.save(commit=False)
@@ -163,7 +168,13 @@ def _booking_form_view(request, booking: Booking | None):
                         f"{c.check_in:%d.%m}–{c.check_out:%d.%m.%Y}",
                     )
             else:
-                messages.success(request, "Бронь сохранена" if obj.kind == Booking.Kind.BOOKING else "Даты закрыты")
+                if is_new:
+                    form.save_initial_payment(obj)
+                if obj.kind == Booking.Kind.BLOCK:
+                    text = "Даты открыты" if obj.is_cancelled else "Даты закрыты"
+                else:
+                    text = f"Сохранено: {obj.get_status_display().lower()}"
+                messages.success(request, text)
                 return redirect(f"{reverse('calendar')}?m={obj.check_in:%Y-%m}")
     else:
         initial = {}
@@ -179,10 +190,20 @@ def _booking_form_view(request, booking: Booking | None):
                 initial["kind"] = Booking.Kind.BLOCK
         form = BookingForm(instance=booking, initial=initial)
 
+    if booking is not None and payment_form is None:
+        balance = booking.balance_due
+        payment_form = PaymentForm(initial={"amount": balance if balance and balance > 0 else None})
     return render(
         request,
         "booking/booking_form.html",
-        {"form": form, "booking": booking, "is_new": is_new, "house": house},
+        {
+            "form": form,
+            "booking": booking,
+            "is_new": is_new,
+            "house": house,
+            "payment_form": payment_form,
+            "payments": list(booking.payments.all()) if booking else [],
+        },
     )
 
 
@@ -193,38 +214,31 @@ def booking_create(request):
 
 @login_required
 def booking_edit(request, pk: int):
-    return _booking_form_view(request, get_object_or_404(Booking, pk=pk))
+    return _booking_form_view(request, get_object_or_404(Booking.objects.select_related("channel"), pk=pk))
 
 
 @login_required
 @require_POST
-def booking_cancel(request, pk: int):
-    booking = get_object_or_404(Booking, pk=pk)
-    cancel_booking(booking, reason="Отменена вручную")
-    if booking.is_imported:
-        messages.warning(
-            request,
-            "Бронь отменена у нас. Если она ещё действует на площадке, при следующей синхронизации "
-            "она вернётся — отменяйте брони с площадки на самой площадке.",
-        )
-    else:
-        messages.success(request, "Бронь отменена, даты освобождены на всех площадках при следующей синхронизации")
-    return redirect(f"{reverse('calendar')}?m={booking.check_in:%Y-%m}")
+def payment_add(request, pk: int):
+    booking = get_object_or_404(Booking.objects.select_related("channel"), pk=pk)
+    form = PaymentForm(request.POST)
+    if not form.is_valid():
+        return _booking_form_view(request, booking, payment_form=form)
+    payment = form.save(commit=False)
+    payment.booking = booking
+    payment.save()
+    messages.success(request, f"{payment.get_kind_display()} {payment.amount:,} ₽ добавлена".replace(",", "\u00a0"))
+    return redirect(f"{reverse('booking_edit', args=[pk])}#payments")
 
 
 @login_required
 @require_POST
-def booking_restore(request, pk: int):
-    booking = get_object_or_404(Booking, pk=pk)
-    booking.status = Booking.Status.ACTIVE
-    booking.cancel_reason = ""
-    try:
-        save_booking(booking)
-    except OverlapError:
-        messages.error(request, "Нельзя восстановить: эти даты уже заняты")
-    else:
-        messages.success(request, "Бронь восстановлена")
-    return redirect("booking_edit", pk=pk)
+def payment_delete(request, pk: int):
+    payment = get_object_or_404(Payment, pk=pk)
+    booking_pk = payment.booking_id
+    payment.delete()
+    messages.success(request, "Платёж удалён")
+    return redirect(f"{reverse('booking_edit', args=[booking_pk])}#payments")
 
 
 @login_required
@@ -254,8 +268,16 @@ def quote_api(request):
 def booking_list(request):
     show = request.GET.get("show", "upcoming")
     today = timezone.localdate()
-    qs = Booking.objects.select_related("channel")
-    if show == "cancelled":
+    qs = Booking.objects.select_related("channel").prefetch_related("payments")
+    if show == "requests":
+        qs = qs.filter(status=Booking.Status.REQUEST, check_out__gte=today).order_by("check_in")
+    elif show == "debts":
+        qs = [
+            b
+            for b in qs.confirmed().filter(kind=Booking.Kind.BOOKING).order_by("check_in")
+            if b.balance_due and b.balance_due > 0
+        ]
+    elif show == "cancelled":
         qs = qs.filter(status=Booking.Status.CANCELLED).order_by("-updated_at")
     elif show == "past":
         qs = qs.active().filter(check_out__lt=today).order_by("-check_in")
@@ -409,3 +431,30 @@ def ical_export(request, token: str):
     resp["Content-Disposition"] = 'inline; filename="calendar.ics"'
     resp["Cache-Control"] = "no-cache"
     return resp
+
+
+# ---------------------------------------------------------------- статистика
+
+
+@login_required
+def stats_view(request):
+    today = timezone.localdate()
+    preset = request.GET.get("period", "this_month")
+    date_from = parse_date(request.GET.get("from", "") or "")
+    date_to = parse_date(request.GET.get("to", "") or "")
+    period = resolve_period(preset, date_from, date_to, today)
+    dash = build_dashboard(period, today)
+    return render(
+        request,
+        "booking/stats.html",
+        {
+            "dash": dash,
+            "kpi": dash.kpi,
+            "presets": PRESETS,
+            "preset": period.preset,
+            "date_from": period.start,
+            "date_to": period.last_day,
+            "chart_data": dash.chart_data(),
+            "sources_height": max(120, 40 * len(dash.sources) + 40),
+        },
+    )

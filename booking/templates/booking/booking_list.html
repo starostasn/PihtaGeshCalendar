@@ -5,20 +5,24 @@
 <div class="cal-head">
   <h1>Брони</h1>
   <a class="btn small{% if show == 'upcoming' %} primary{% endif %}" href="?show=upcoming">Будущие</a>
+  <a class="btn small{% if show == 'requests' %} primary{% endif %}" href="?show=requests">Заявки</a>
+  <a class="btn small{% if show == 'debts' %} primary{% endif %}" href="?show=debts">Долги</a>
   <a class="btn small{% if show == 'past' %} primary{% endif %}" href="?show=past">Прошедшие</a>
   <a class="btn small{% if show == 'cancelled' %} primary{% endif %}" href="?show=cancelled">Отменённые</a>
 </div>
 <div class="card scroll-x">
   {% if bookings %}
   <table class="list">
-    <tr><th>Даты</th><th>Гость</th><th>Источник</th><th>Сумма</th><th>Оплачено</th>{% if show == 'cancelled' %}<th>Причина</th>{% endif %}</tr>
+    <tr><th>Даты</th><th>Гость</th><th>Статус</th><th>Источник</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th>{% if show == 'cancelled' %}<th>Причина</th>{% endif %}</tr>
     {% for b in bookings %}
     <tr>
       <td><a href="{% url 'booking_edit' b.pk %}">{{ b.check_in|date:"d.m.Y" }} – {{ b.check_out|date:"d.m.Y" }}</a><br><span class="muted small">{{ b.nights }} н.</span></td>
       <td>{{ b.title }}{% if b.phone %}<br><a class="small" href="tel:{{ b.phone }}">{{ b.phone }}</a>{% endif %}</td>
+      <td><span class="status status-{{ b.status }}">{% if b.kind == 'block' %}{% if b.is_cancelled %}Открыто{% else %}Закрыто{% endif %}{% else %}{{ b.get_status_display }}{% endif %}</span></td>
       <td><span class="dot" style="--c: {{ b.color }}"></span> {{ b.source_name }}</td>
       <td>{{ b.total_price|rub }}</td>
-      <td>{{ b.prepaid|rub }}</td>
+      <td>{% if b.kind == 'booking' %}{{ b.paid|rub }}{% endif %}</td>
+      <td>{% if b.kind == 'booking' and b.balance_due is not None %}<span class="{% if b.balance_due > 0 %}due-text{% elif b.balance_due < 0 %}warn-text{% else %}ok-text{% endif %}">{% if b.balance_due < 0 %}переплата {{ b.balance_due|abs_int|rub }}{% elif b.balance_due == 0 %}оплачено{% else %}{{ b.balance_due|rub }}{% endif %}</span>{% endif %}</td>
       {% if show == 'cancelled' %}<td class="small">{{ b.cancel_reason }}</td>{% endif %}
     </tr>
     {% endfor %}

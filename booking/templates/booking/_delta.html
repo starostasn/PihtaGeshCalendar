@@ -1,0 +1,1 @@
+{% if d %}<span class="delta {% if d.zero %}flat{% elif d.up %}up{% else %}down{% endif %}"><span aria-hidden="true">{% if d.zero %}→{% elif d.up %}▲{% else %}▼{% endif %}</span> {{ d.text }}<span class="muted"> к прошлому</span></span>{% endif %}

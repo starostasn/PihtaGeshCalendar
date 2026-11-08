@@ -1,0 +1,172 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}Статистика{% endblock %}
+{% block content %}
+<div class="cal-head">
+  <h1>Статистика</h1>
+  <span class="muted">{{ dash.period.label }} · сравнение: {{ dash.prev.label }}</span>
+</div>
+
+<form class="filters" method="get" id="statsFilters">
+  <div class="chips" role="radiogroup" aria-label="Период">
+    {% for key, label in presets %}
+      <label class="chip"><input type="radio" name="period" value="{{ key }}"{% if key == preset %} checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+  <div class="custom-range" id="customRange"{% if preset != 'custom' %} hidden{% endif %}>
+    <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}" aria-label="С даты">
+    <span class="muted">—</span>
+    <input type="date" name="to" value="{{ date_to|date:'Y-m-d' }}" aria-label="По дату">
+    <button class="btn small primary" type="submit">Показать</button>
+  </div>
+</form>
+
+{% if dash.missing_price %}
+<div class="msg warning">У {{ dash.missing_price }} {{ dash.missing_price|ru_plural:"брони,броней,броней" }} в периоде не указана сумма — они не попали в выручку. <a href="{% url 'booking_list' %}">Открыть брони</a></div>
+{% endif %}
+
+<section class="kpis" aria-label="Главные показатели">
+  <div class="kpi hero">
+    <span class="kpi-label">Выручка</span>
+    <span class="kpi-value">{{ kpi.revenue|rub }} ₽</span>
+    {% include "booking/_delta.html" with d=kpi.revenue_delta %}
+    <span class="kpi-sub">{% if kpi.commission %}чистыми {{ kpi.net|rub }} ₽ · комиссии {{ kpi.commission|rub }} ₽{% else %}по ночам внутри периода{% endif %}</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Загрузка</span>
+    <span class="kpi-value">{% if kpi.occupancy is not None %}{{ kpi.occupancy|floatformat:0 }}%{% else %}—{% endif %}</span>
+    {% include "booking/_delta.html" with d=kpi.occupancy_delta %}
+    <span class="kpi-sub">занято {{ kpi.occupied }} из {{ kpi.available }} ноч.{% if kpi.blocked %} · закрыто {{ kpi.blocked }}{% endif %}</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Средняя цена ночи</span>
+    <span class="kpi-value">{% if kpi.adr is not None %}{{ kpi.adr|rub }} ₽{% else %}—{% endif %}</span>
+    {% include "booking/_delta.html" with d=kpi.adr_delta %}
+    <span class="kpi-sub">выручка ÷ занятые ночи</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Доход на ночь периода</span>
+    <span class="kpi-value">{% if kpi.revpar is not None %}{{ kpi.revpar|rub }} ₽{% else %}—{% endif %}</span>
+    <span class="kpi-sub">выручка ÷ все доступные ночи</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Заезды</span>
+    <span class="kpi-value">{{ kpi.arrivals }}</span>
+    {% include "booking/_delta.html" with d=kpi.arrivals_delta %}
+    <span class="kpi-sub">{% if kpi.avg_stay %}в среднем {{ kpi.avg_stay|floatformat:1 }} ноч.{% else %}броней с заездом в периоде{% endif %}</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Бронируют заранее</span>
+    <span class="kpi-value">{% if kpi.avg_lead is not None %}{{ kpi.avg_lead|floatformat:0 }} дн.{% else %}—{% endif %}</span>
+    <span class="kpi-sub">в среднем до заезда</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Отмены</span>
+    <span class="kpi-value">{% if kpi.cancel_rate is not None %}{{ kpi.cancel_rate|floatformat:0 }}%{% else %}—{% endif %}</span>
+    <span class="kpi-sub">{{ kpi.cancelled }} отмен{% if dash.requests_count %} · заявок {{ dash.requests_count }} ({{ dash.requests_nights }} ноч.){% endif %}</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Получено оплат</span>
+    <span class="kpi-value">{{ kpi.received|rub }} ₽</span>
+    <span class="kpi-sub">по дате платежа</span>
+  </div>
+  <div class="kpi">
+    <span class="kpi-label">Ждём оплату</span>
+    <span class="kpi-value">{{ kpi.outstanding|rub }} ₽</span>
+    <span class="kpi-sub">{% if dash.debts %}<a href="#debts">{{ dash.debts|length }} {{ dash.debts|length|ru_plural:"бронь,брони,броней" }}</a>{% else %}долгов нет{% endif %}</span>
+  </div>
+</section>
+
+<section class="charts">
+  <figure class="card chart-card">
+    <figcaption><h2>Выручка {% if dash.granularity == 'week' %}по неделям{% else %}по месяцам{% endif %}</h2>
+      <span class="muted small">Светлые столбцы — будущие даты, уже забронированные</span></figcaption>
+    <div class="chart-box"><canvas id="chartRevenue" role="img" aria-label="Выручка по периодам, таблица ниже"></canvas></div>
+    <details><summary>Таблица</summary>
+      <table class="list small"><tr><th>Период</th><th class="num">Выручка</th><th class="num">Загрузка</th><th class="num">Ночей занято</th></tr>
+        {% for s in dash.series %}<tr><td>{{ s.label }}</td><td class="num">{{ s.revenue|rub }} ₽</td><td class="num">{% if s.occupancy is not None %}{{ s.occupancy|floatformat:0 }}%{% else %}—{% endif %}</td><td class="num">{{ s.occupied }} / {{ s.available }}</td></tr>{% endfor %}
+      </table>
+    </details>
+  </figure>
+
+  <figure class="card chart-card">
+    <figcaption><h2>Загрузка {% if dash.granularity == 'week' %}по неделям{% else %}по месяцам{% endif %}, %</h2>
+      <span class="muted small">Занятые ночи от доступных</span></figcaption>
+    <div class="chart-box"><canvas id="chartOccupancy" role="img" aria-label="Загрузка по периодам, таблица в карточке выручки"></canvas></div>
+  </figure>
+
+  <figure class="card chart-card">
+    <figcaption><h2>Источники броней</h2><span class="muted small">Выручка за период</span></figcaption>
+    {% if dash.sources %}
+    <div class="chart-box" style="height: {{ sources_height }}px"><canvas id="chartSources" role="img" aria-label="Выручка по источникам, таблица ниже"></canvas></div>
+    <div class="scroll-x">
+    <table class="list small">
+      <tr><th>Источник</th><th class="num">Броней</th><th class="num">Ночей</th><th class="num">Выручка</th><th class="num">Комиссия</th><th class="num">Чистыми</th><th class="num">Доля</th></tr>
+      {% for s in dash.sources %}
+      <tr>
+        <td><span class="dot" style="--c: {{ s.color }}"></span> {{ s.name }}</td>
+        <td class="num">{{ s.bookings }}</td>
+        <td class="num">{{ s.nights }}</td>
+        <td class="num">{{ s.revenue|rub }} ₽</td>
+        <td class="num">{% if s.commission %}{{ s.commission|rub }} ₽{% else %}—{% endif %}</td>
+        <td class="num">{{ s.net|rub }} ₽</td>
+        <td class="num">{{ s.share|floatformat:0 }}%</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    <p class="muted small">Комиссию площадки укажите в её настройках («Площадки» → «Настроить»).</p>
+    {% else %}<p class="muted">За период броней нет.</p>{% endif %}
+  </figure>
+
+  <figure class="card chart-card">
+    <figcaption><h2>Загрузка по дням недели, %</h2><span class="muted small">По ночам: «Пт» — ночь с пятницы на субботу</span></figcaption>
+    <div class="chart-box"><canvas id="chartWeekdays" role="img" aria-label="Загрузка по дням недели"></canvas></div>
+    <details><summary>Таблица</summary>
+      <table class="list small"><tr>{% for w in dash.weekdays %}<th>{{ w.label }}</th>{% endfor %}</tr>
+        <tr>{% for w in dash.weekdays %}<td>{% if w.occupancy is not None %}{{ w.occupancy|floatformat:0 }}%{% else %}—{% endif %}</td>{% endfor %}</tr></table>
+    </details>
+  </figure>
+
+  <figure class="card chart-card">
+    <figcaption><h2>Срок проживания</h2><span class="muted small">Количество заездов по числу ночей</span></figcaption>
+    <div class="chart-box"><canvas id="chartStay" role="img" aria-label="Распределение броней по сроку проживания"></canvas></div>
+    <details><summary>Таблица</summary>
+      <table class="list small"><tr>{% for x in dash.stay %}<th>{{ x.label }}</th>{% endfor %}</tr><tr>{% for x in dash.stay %}<td>{{ x.count }}</td>{% endfor %}</tr></table>
+    </details>
+  </figure>
+
+  <figure class="card chart-card">
+    <figcaption><h2>За сколько дней бронируют</h2><span class="muted small">От создания брони до заезда</span></figcaption>
+    <div class="chart-box"><canvas id="chartLead" role="img" aria-label="Распределение броней по глубине бронирования"></canvas></div>
+    <details><summary>Таблица</summary>
+      <table class="list small"><tr>{% for x in dash.lead %}<th>{{ x.label }}</th>{% endfor %}</tr><tr>{% for x in dash.lead %}<td>{{ x.count }}</td>{% endfor %}</tr></table>
+    </details>
+  </figure>
+</section>
+
+<section class="card" id="debts">
+  <h2 style="margin-top:0">Ждём оплату</h2>
+  {% if dash.debts %}
+  <ul class="blist">
+    {% for b in dash.debts %}
+    <li>
+      <span class="dot" style="--c: {{ b.color }}"></span>
+      <a href="{% url 'booking_edit' b.pk %}#payments" class="dates">{{ b.check_in|date:"d.m" }} – {{ b.check_out|date:"d.m.Y" }}</a>
+      <a href="{% url 'booking_edit' b.pk %}#payments">{{ b.title }} <span class="muted small">· {{ b.source_name }} · оплачено {{ b.paid|rub }} из {{ b.total_price|rub }} ₽</span></a>
+      <span class="due-text" style="margin-left:auto; white-space:nowrap">{{ b.balance_due|rub }} ₽</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">По броням этого периода всё оплачено.</p>{% endif %}
+</section>
+
+<p class="muted small">Выручка делится по ночам: бронь на 3 ночи за 30 000 ₽ даёт по 10 000 ₽ на каждую ночь, поэтому бронь на стыке месяцев
+  попадает в оба. В выручку и загрузку входят только брони со статусом «Бронь»; заявки и отмены считаются отдельно.</p>
+
+{{ chart_data|json_script:"chart-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'booking/vendor/chart.umd.min.js' %}"></script>
+<script src="{% static 'booking/stats.js' %}"></script>
+{% endblock %}

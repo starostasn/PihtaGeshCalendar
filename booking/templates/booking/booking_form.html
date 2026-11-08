@@ -6,22 +6,47 @@
   <a href="{% url 'calendar' %}{% if booking %}?m={{ booking.check_in|date:'Y-m' }}{% endif %}">← Календарь</a>
 </div>
 <div class="card">
-  <h1>{% if is_new %}Новая бронь{% else %}{{ booking.get_kind_display }}: {{ booking.title }}{% endif %}</h1>
+  <div class="row" style="justify-content:space-between">
+    <h1 style="margin:0">{% if is_new %}Новая бронь{% else %}{{ booking.title }}{% endif %}</h1>
+    {% if booking %}<span class="status status-{{ booking.status }}">{{ booking.get_status_display }}</span>{% endif %}
+  </div>
 
-  {% if booking and booking.status == 'cancelled' %}
-    <div class="msg warning">Отменена{% if booking.cancel_reason %}: {{ booking.cancel_reason }}{% endif %}.</div>
+  {% if booking and booking.status == 'cancelled' and booking.cancel_reason %}
+    <div class="msg warning" style="margin-top:12px">Отменена: {{ booking.cancel_reason }}.</div>
   {% endif %}
   {% if booking and booking.is_imported %}
-    <div class="msg warning small">
+    <div class="msg warning small" style="margin-top:12px">
       Бронь пришла с площадки «{{ booking.source_name }}» по iCal{% if booking.external_summary %} («{{ booking.external_summary }}»){% endif %}.
-      Даты меняются только на площадке — здесь можно дописать гостя, сумму и комментарий.
+      Даты и статус меняются только на площадке — здесь можно дописать гостя, сумму, платежи и комментарий.
     </div>
   {% endif %}
 
-  <form method="post" class="form" id="bookingForm" data-quote-url="{% url 'quote_api' %}"{% if booking %} data-exclude="{{ booking.pk }}"{% endif %}>
+  <form method="post" class="form" id="bookingForm" style="margin-top:12px"
+        action="{% if booking %}{% url 'booking_edit' booking.pk %}{% endif %}"
+        data-quote-url="{% url 'quote_api' %}"{% if booking %} data-exclude="{{ booking.pk }}"{% endif %}>
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <p>{{ form.kind }}</p>
+    <div class="grid2">
+      <div class="field">
+        <label>Статус</label>
+        <div class="seg seg-status">
+          {% for radio in form.status %}
+            <label class="seg-item seg-{{ radio.data.value }}">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>
+          {% endfor %}
+        </div>
+        {{ form.status.errors }}
+        <span class="helptext">Заявка занимает даты у вас, но не закрывает их на площадках.</span>
+      </div>
+      <div class="field">
+        <label>Тип</label>
+        <div class="seg">
+          {% for radio in form.kind %}
+            <label class="seg-item">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>
+          {% endfor %}
+        </div>
+        {{ form.kind.errors }}
+      </div>
+    </div>
     <div class="grid2">
       <p>{{ form.check_in.label_tag }}{{ form.check_in }}{{ form.check_in.errors }}</p>
       <p>{{ form.check_out.label_tag }}{{ form.check_out }}{{ form.check_out.errors }}</p>
@@ -33,29 +58,79 @@
       <p>{{ form.guests.label_tag }}{{ form.guests }}{{ form.guests.errors }}<span class="helptext">Максимум {{ house.max_guests }}</span></p>
       <p>{{ form.channel.label_tag }}{{ form.channel }}{{ form.channel.errors }}</p>
       <p>{{ form.total_price.label_tag }}{{ form.total_price }}{{ form.total_price.errors }}</p>
-      <p>{{ form.prepaid.label_tag }}{{ form.prepaid }}{{ form.prepaid.errors }}</p>
+      {% if form.initial_payment %}
+      <p>{{ form.initial_payment.label_tag }}{{ form.initial_payment }}{{ form.initial_payment.errors }}</p>
+      <p>{{ form.initial_payment_method.label_tag }}{{ form.initial_payment_method }}</p>
+      {% endif %}
     </div>
     <p>{{ form.comment.label_tag }}{{ form.comment }}{{ form.comment.errors }}</p>
     <div class="row">
       <button class="btn primary" type="submit">Сохранить</button>
-      <a class="btn" href="{% url 'calendar' %}">Отмена</a>
+      <a class="btn" href="{% url 'calendar' %}">Назад</a>
+      {% if booking %}<span class="muted small">Создана {{ booking.created_at|date:"d.m.Y H:i" }}, изменена {{ booking.updated_at|date:"d.m.Y H:i" }}</span>{% endif %}
     </div>
   </form>
 </div>
 
-{% if booking %}
-<div class="card row">
-  {% if booking.status == 'active' %}
-  <form class="inline" method="post" action="{% url 'booking_cancel' booking.pk %}" onsubmit="return confirm('Отменить бронь и освободить даты?')">
-    {% csrf_token %}<button class="btn danger" type="submit">{% if booking.kind == 'block' %}Открыть даты{% else %}Отменить бронь{% endif %}</button>
-  </form>
+{% if booking and booking.kind == 'booking' %}
+<section class="card" id="payments">
+  <h2 style="margin-top:0">Платежи</h2>
+
+  <div class="pay-summary">
+    <div><span class="muted small">Сумма брони</span><b>{% if booking.total_price is not None %}{{ booking.total_price|rub }} ₽{% else %}—{% endif %}</b></div>
+    <div><span class="muted small">Оплачено</span><b>{{ booking.paid|rub }} ₽</b></div>
+    <div>
+      <span class="muted small">{% if booking.balance_due < 0 %}Переплата{% else %}Остаток{% endif %}</span>
+      <b class="{% if booking.payment_state == 'paid' %}ok-text{% elif booking.payment_state == 'overpaid' %}warn-text{% elif booking.balance_due %}due-text{% endif %}">
+        {% if booking.balance_due is None %}—{% elif booking.balance_due < 0 %}{{ booking.balance_due|abs_int|rub }} ₽{% else %}{{ booking.balance_due|rub }} ₽{% endif %}
+      </b>
+    </div>
+    <div><span class="muted small">Состояние</span><span class="badge pay-{{ booking.payment_state }}">{{ booking.payment_state_display }}</span></div>
+  </div>
+  {% if booking.total_price %}
+  <div class="progress" role="progressbar" aria-valuenow="{{ booking.paid_percent }}" aria-valuemin="0" aria-valuemax="100" aria-label="Оплачено">
+    <span style="width: {{ booking.paid_percent }}%"></span>
+  </div>
   {% else %}
-  <form class="inline" method="post" action="{% url 'booking_restore' booking.pk %}">
-    {% csrf_token %}<button class="btn" type="submit">Восстановить</button>
-  </form>
+  <p class="muted small">Укажите сумму брони, чтобы считать остаток.</p>
   {% endif %}
-  <span class="muted small">Создана {{ booking.created_at|date:"d.m.Y H:i" }}, изменена {{ booking.updated_at|date:"d.m.Y H:i" }}</span>
-</div>
+
+  {% if payments %}
+  <div class="scroll-x">
+  <table class="list">
+    <tr><th>Дата</th><th>Тип</th><th>Способ</th><th class="num">Сумма</th><th>Комментарий</th><th></th></tr>
+    {% for p in payments %}
+    <tr>
+      <td>{{ p.date|date:"d.m.Y" }}</td>
+      <td>{{ p.get_kind_display }}</td>
+      <td>{{ p.get_method_display }}</td>
+      <td class="num{% if p.kind == 'refund' %} due-text{% endif %}">{% if p.kind == 'refund' %}−{% endif %}{{ p.amount|rub }} ₽</td>
+      <td class="small">{{ p.comment }}</td>
+      <td class="num">
+        <form class="inline" method="post" action="{% url 'payment_delete' p.pk %}" onsubmit="return confirm('Удалить платёж?')">
+          {% csrf_token %}<button class="btn small danger" type="submit" aria-label="Удалить платёж">Удалить</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">Платежей пока нет.</p>
+  {% endif %}
+
+  <h3>Добавить платёж</h3>
+  <form method="post" action="{% url 'payment_add' booking.pk %}" class="form pay-form">
+    {% csrf_token %}
+    {{ payment_form.non_field_errors }}
+    <p>{{ payment_form.date.label_tag }}{{ payment_form.date }}{{ payment_form.date.errors }}</p>
+    <p>{{ payment_form.kind.label_tag }}{{ payment_form.kind }}{{ payment_form.kind.errors }}</p>
+    <p>{{ payment_form.amount.label_tag }}{{ payment_form.amount }}{{ payment_form.amount.errors }}</p>
+    <p>{{ payment_form.method.label_tag }}{{ payment_form.method }}{{ payment_form.method.errors }}</p>
+    <p class="wide">{{ payment_form.comment.label_tag }}{{ payment_form.comment }}{{ payment_form.comment.errors }}</p>
+    <p class="wide"><button class="btn primary" type="submit">Добавить платёж</button></p>
+  </form>
+</section>
 {% endif %}
 {% endblock %}
 {% block scripts %}<script src="{% static 'booking/booking_form.js' %}"></script>{% endblock %}

@@ -1,6 +1,8 @@
 from django import forms
 
-from .models import WEEKDAY_NAMES, Booking, Channel, House, PriceRule
+from django.utils import timezone
+
+from .models import WEEKDAY_NAMES, Booking, Channel, House, Payment, PriceRule
 
 
 class DateInput(forms.DateInput):
@@ -11,10 +13,17 @@ class DateInput(forms.DateInput):
 
 
 class BookingForm(forms.ModelForm):
+    # Только при создании брони: сразу записать первый платёж (предоплату)
+    initial_payment = forms.IntegerField(label="Предоплата, ₽", min_value=0, required=False)
+    initial_payment_method = forms.ChoiceField(
+        label="Способ оплаты", choices=Payment.Method.choices, initial=Payment.Method.TRANSFER, required=False
+    )
+
     class Meta:
         model = Booking
         fields = [
             "kind",
+            "status",
             "check_in",
             "check_out",
             "guest_name",
@@ -22,7 +31,6 @@ class BookingForm(forms.ModelForm):
             "guests",
             "channel",
             "total_price",
-            "prepaid",
             "comment",
         ]
         widgets = {
@@ -30,6 +38,7 @@ class BookingForm(forms.ModelForm):
             "check_out": DateInput(),
             "comment": forms.Textarea(attrs={"rows": 3}),
             "kind": forms.RadioSelect(),
+            "status": forms.RadioSelect(),
             "phone": forms.TextInput(attrs={"type": "tel"}),
         }
 
@@ -37,20 +46,45 @@ class BookingForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["channel"].empty_label = "Напрямую"
         self.fields["channel"].queryset = Channel.objects.all()
-        if self.instance.pk and self.instance.is_imported:
-            # Даты и источник импортированной брони задаёт площадка.
-            for name in ("check_in", "check_out", "channel", "kind"):
-                self.fields[name].disabled = True
+        if self.instance.pk:
+            del self.fields["initial_payment"]
+            del self.fields["initial_payment_method"]
+            if self.instance.is_imported:
+                # Даты, статус и источник импортированной брони задаёт площадка.
+                for name in ("check_in", "check_out", "channel", "kind", "status"):
+                    self.fields[name].disabled = True
 
     def clean(self):
         data = super().clean()
         check_in, check_out = data.get("check_in"), data.get("check_out")
         if check_in and check_out and check_out <= check_in:
             self.add_error("check_out", "Дата выезда должна быть позже даты заезда.")
-        prepaid, total = data.get("prepaid") or 0, data.get("total_price")
-        if total is not None and prepaid > total:
-            self.add_error("prepaid", "Предоплата больше суммы брони.")
+        if data.get("kind") == Booking.Kind.BLOCK and data.get("status") == Booking.Status.REQUEST:
+            self.add_error("status", "Закрытые даты не могут быть заявкой — выберите «Бронь» или «Отмена».")
         return data
+
+    def save_initial_payment(self, booking: Booking) -> Payment | None:
+        amount = self.cleaned_data.get("initial_payment")
+        if not amount or booking.kind != Booking.Kind.BOOKING:
+            return None
+        return Payment.objects.create(
+            booking=booking,
+            amount=amount,
+            method=self.cleaned_data.get("initial_payment_method") or Payment.Method.TRANSFER,
+            comment="Предоплата",
+        )
+
+
+class PaymentForm(forms.ModelForm):
+    class Meta:
+        model = Payment
+        fields = ["date", "kind", "amount", "method", "comment"]
+        widgets = {"date": DateInput(), "amount": forms.NumberInput(attrs={"min": 1})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.is_bound and not self.initial.get("date"):
+            self.initial["date"] = timezone.localdate()
 
 
 class HouseForm(forms.ModelForm):
@@ -124,5 +158,5 @@ class PeriodPriceForm(forms.Form):
 class ChannelForm(forms.ModelForm):
     class Meta:
         model = Channel
-        fields = ["name", "color", "import_url", "is_active"]
+        fields = ["name", "color", "import_url", "commission_percent", "is_active"]
         widgets = {"color": forms.TextInput(attrs={"type": "color"})}

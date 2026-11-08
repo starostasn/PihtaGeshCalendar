@@ -181,7 +181,7 @@ class ApplyFeedTests(TestCase):
     def test_past_bookings_untouched(self):
         Booking.objects.create(channel=self.ch, external_uid="old", check_in=d(-10), check_out=d(-7))
         apply_feed(self.ch, [self.ev("1", 5, 7)])
-        self.assertEqual(Booking.objects.get(external_uid="old").status, Booking.Status.ACTIVE)
+        self.assertEqual(Booking.objects.get(external_uid="old").status, Booking.Status.CONFIRMED)
 
     def test_empty_feed_does_not_mass_cancel(self):
         apply_feed(self.ch, [self.ev("1", 5, 7), self.ev("2", 10, 12)])
@@ -284,7 +284,7 @@ class ViewTests(TestCase):
             "check_in": d(10).isoformat(),
             "check_out": d(12).isoformat(),
             "guest_name": "Мария",
-            "prepaid": 0,
+            "status": "confirmed",
             "total_price": 20000,
         }
         resp = self.client.post(reverse("booking_create"), data)
@@ -303,11 +303,12 @@ class ViewTests(TestCase):
         b = Booking.objects.create(check_in=d(6), check_out=d(8), channel=ch, external_uid="u1")
         resp = self.client.post(
             reverse("booking_edit", args=[b.pk]),
-            {"check_in": d(1).isoformat(), "check_out": d(20).isoformat(), "guest_name": "Олег", "prepaid": 0},
+            {"check_in": d(1).isoformat(), "check_out": d(20).isoformat(), "guest_name": "Олег", "status": "cancelled"},
         )
         self.assertEqual(resp.status_code, 302)
         b.refresh_from_db()
         self.assertEqual((b.check_in, b.check_out, b.guest_name, b.channel), (d(6), d(8), "Олег", ch))
+        self.assertEqual(b.status, Booking.Status.CONFIRMED)  # статус импортированной брони задаёт площадка
 
     def test_quote_api(self):
         self.client.force_login(self.user)
@@ -356,3 +357,162 @@ class ViewTests(TestCase):
         ch = Channel.objects.create(name="Авито")
         resp = self.client.post(reverse("channel_sync", args=[ch.pk]))
         self.assertEqual(resp.status_code, 302)  # без ссылки — сообщение об ошибке, без падения
+
+
+# ---------------------------------------------------------------- статусы, платежи, статистика
+
+from .models import Payment  # noqa: E402
+from .stats import build_dashboard, resolve_period  # noqa: E402
+
+
+class StatusTests(TestCase):
+    def test_request_blocks_overlap_but_is_not_exported(self):
+        ch = Channel.objects.create(name="Авито")
+        save_booking(Booking(check_in=d(10), check_out=d(12), status=Booking.Status.REQUEST, guest_name="Заявка"))
+        save_booking(Booking(check_in=d(20), check_out=d(22), guest_name="Бронь"))
+        with self.assertRaises(OverlapError):
+            save_booking(Booking(check_in=d(11), check_out=d(13)))
+        exported = parse_feed(build_export(ch))
+        self.assertEqual([(e.start, e.end) for e in exported], [(d(20), d(22))])
+
+    def test_cancelled_restore_checks_overlap(self):
+        a = save_booking(Booking(check_in=d(10), check_out=d(12), status=Booking.Status.CANCELLED))
+        save_booking(Booking(check_in=d(10), check_out=d(12)))
+        a.status = Booking.Status.CONFIRMED
+        with self.assertRaises(OverlapError):
+            save_booking(a)
+
+    def test_block_cannot_be_request(self):
+        from .forms import BookingForm
+
+        form = BookingForm(
+            data={"kind": "block", "status": "request", "check_in": d(1).isoformat(), "check_out": d(2).isoformat()}
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("status", form.errors)
+
+    def test_imported_booking_reactivated_as_confirmed(self):
+        ch = Channel.objects.create(name="Авито", import_url="https://example.com/a.ics")
+        apply_feed(ch, [FeedEvent("1", d(5), d(7))])
+        b = Booking.objects.get(external_uid="1")
+        self.assertEqual(b.status, Booking.Status.CONFIRMED)
+        b.status = Booking.Status.CANCELLED
+        b.save()
+        apply_feed(ch, [FeedEvent("1", d(5), d(7))])
+        b.refresh_from_db()
+        self.assertEqual(b.status, Booking.Status.CONFIRMED)
+
+
+class PaymentTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("owner", password="very-secret-pass")
+        self.client.force_login(self.user)
+
+    def test_balance_and_states(self):
+        b = Booking.objects.create(check_in=d(1), check_out=d(3), total_price=20000)
+        self.assertEqual((b.paid, b.balance_due, b.payment_state), (0, 20000, "unpaid"))
+        Payment.objects.create(booking=b, amount=6000)
+        self.assertEqual((b.paid, b.balance_due, b.payment_state, b.paid_percent), (6000, 14000, "partial", 30))
+        Payment.objects.create(booking=b, amount=16000)
+        self.assertEqual((b.balance_due, b.payment_state), (-2000, "overpaid"))
+        Payment.objects.create(booking=b, amount=2000, kind=Payment.Kind.REFUND)
+        self.assertEqual((b.paid, b.balance_due, b.payment_state), (20000, 0, "paid"))
+        self.assertEqual(Booking.objects.create(check_in=d(5), check_out=d(6)).payment_state, "unknown")
+
+    def test_create_with_prepayment_add_and_delete_payment(self):
+        resp = self.client.post(
+            reverse("booking_create"),
+            {
+                "kind": "booking",
+                "status": "request",
+                "check_in": d(10).isoformat(),
+                "check_out": d(12).isoformat(),
+                "total_price": 20000,
+                "initial_payment": 5000,
+                "initial_payment_method": "sbp",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        b = Booking.objects.get()
+        self.assertEqual((b.status, b.paid), (Booking.Status.REQUEST, 5000))
+        self.assertEqual(b.payments.get().method, "sbp")
+
+        resp = self.client.post(
+            reverse("payment_add", args=[b.pk]),
+            {"date": d(0).isoformat(), "kind": "payment", "amount": 15000, "method": "cash"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(b.balance_due, 0)
+        page = self.client.get(reverse("booking_edit", args=[b.pk]))
+        self.assertContains(page, "Оплачено")
+
+        bad = self.client.post(reverse("payment_add", args=[b.pk]), {"date": d(0).isoformat(), "kind": "payment", "amount": 0, "method": "cash"})
+        self.assertEqual(bad.status_code, 200)  # ошибка формы, страница брони с ошибкой
+        self.assertEqual(b.payments.count(), 2)
+
+        p = b.payments.order_by("pk").last()
+        self.client.post(reverse("payment_delete", args=[p.pk]))
+        self.assertEqual(b.payments.count(), 1)
+
+    def test_lists_render_with_payments(self):
+        b = Booking.objects.create(check_in=d(1), check_out=d(3), total_price=20000, guest_name="Должник")
+        Payment.objects.create(booking=b, amount=1000)
+        for show in ("upcoming", "requests", "debts", "past", "cancelled"):
+            self.assertEqual(self.client.get(reverse("booking_list"), {"show": show}).status_code, 200, show)
+        self.assertContains(self.client.get(reverse("booking_list"), {"show": "debts"}), "Должник")
+        self.assertContains(self.client.get(reverse("calendar")), "к оплате")
+
+
+class StatsTests(TestCase):
+    def test_revenue_split_by_nights_and_occupancy(self):
+        from datetime import date as _date
+
+        avito = Channel.objects.create(name="Авито", commission_percent=10)
+        # 3 ночи: 30.01, 31.01, 01.02 — две ночи в январе, одна в феврале
+        Booking.objects.create(check_in=_date(2025, 1, 30), check_out=_date(2025, 2, 2), total_price=30000, channel=avito)
+        Booking.objects.create(check_in=_date(2025, 1, 10), check_out=_date(2025, 1, 12), total_price=10000)
+        Booking.objects.create(check_in=_date(2025, 1, 15), check_out=_date(2025, 1, 17), total_price=99999,
+                               status=Booking.Status.CANCELLED)
+        Booking.objects.create(check_in=_date(2025, 1, 20), check_out=_date(2025, 1, 21), total_price=5000,
+                               status=Booking.Status.REQUEST)
+        Booking.objects.create(kind=Booking.Kind.BLOCK, check_in=_date(2025, 1, 1), check_out=_date(2025, 1, 6))
+
+        period = resolve_period("custom", _date(2025, 1, 1), _date(2025, 1, 31), _date(2025, 3, 1))
+        dash = build_dashboard(period, _date(2025, 3, 1))
+        k = dash.kpi
+        self.assertEqual(k["revenue"], 30000)  # 20000 (2 ночи из 3) + 10000
+        self.assertEqual(k["commission"], 2000)
+        self.assertEqual((k["occupied"], k["available"], k["blocked"]), (4, 26, 5))
+        self.assertAlmostEqual(k["occupancy"], 4 / 26 * 100)
+        self.assertEqual(k["adr"], 7500)
+        self.assertEqual((k["arrivals"], k["cancelled"]), (2, 1))
+        self.assertAlmostEqual(k["cancel_rate"], 100 / 3)
+        self.assertEqual((dash.requests_count, dash.requests_nights), (1, 1))
+        self.assertEqual([s["name"] for s in dash.sources], ["Авито", "Напрямую"])
+        self.assertEqual(dash.sources[0]["net"], 18000)
+        self.assertEqual(dash.granularity, "week")
+        self.assertEqual(sum(s["revenue"] for s in dash.series), 30000)
+
+    def test_presets(self):
+        from datetime import date as _date
+
+        today = _date(2026, 3, 15)
+        self.assertEqual(resolve_period("this_month", None, None, today).start, _date(2026, 3, 1))
+        lm = resolve_period("last_month", None, None, today)
+        self.assertEqual((lm.start, lm.end), (_date(2026, 2, 1), _date(2026, 3, 1)))
+        self.assertEqual(lm.previous().start, _date(2026, 1, 1))
+        y = resolve_period("this_year", None, None, today)
+        self.assertEqual((y.start, y.end, y.previous().start), (_date(2026, 1, 1), _date(2027, 1, 1), _date(2025, 1, 1)))
+        self.assertEqual(resolve_period("last_12", None, None, today).start, _date(2025, 4, 1))
+        self.assertEqual(resolve_period("custom", None, None, today).preset, "this_month")  # без дат — текущий месяц
+
+    def test_stats_page_renders_for_all_presets(self):
+        self.client.force_login(User.objects.create_user("owner", password="very-secret-pass"))
+        b = Booking.objects.create(check_in=d(-3), check_out=d(2), total_price=50000, guest_name="Гость")
+        Payment.objects.create(booking=b, amount=10000)
+        for preset in ("this_month", "last_month", "next_90", "last_12", "this_year", "last_year", "garbage"):
+            resp = self.client.get(reverse("stats"), {"period": preset})
+            self.assertEqual(resp.status_code, 200, preset)
+        resp = self.client.get(reverse("stats"), {"period": "custom", "from": d(-10).isoformat(), "to": d(10).isoformat()})
+        self.assertContains(resp, "Ждём оплату")
+        self.assertContains(resp, "chart-data")

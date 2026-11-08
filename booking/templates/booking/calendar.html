@@ -29,14 +29,14 @@
     <div class="cal">
       {% for wd in weekday_names %}<div class="wd">{{ wd }}</div>{% endfor %}
       {% for week in month.weeks %}{% for day in week %}
-        <div class="day{% if not day.in_month %} out{% endif %}{% if day.is_past %} past{% endif %}{% if day.is_today %} today{% endif %}{% if day.booking %} busy{% else %} free{% endif %}{% if day.conflict %} conflict{% endif %}"
+        <div class="day{% if not day.in_month %} out{% endif %}{% if day.is_past %} past{% endif %}{% if day.is_today %} today{% endif %}{% if day.booking %} busy{% else %} free{% endif %}{% if day.conflict %} conflict{% endif %}{% if day.booking.is_request %} request{% endif %}"
              data-date="{{ day.date|date:'Y-m-d' }}"{% if day.booking %} data-booking="{% url 'booking_edit' day.booking.pk %}"{% endif %}
-             title="{% if day.booking %}{{ day.booking.source_name }}: {{ day.booking.title }}{% else %}{{ day.price|rub }} ₽{% endif %}">
+             title="{% if day.booking %}{{ day.booking.get_status_display }} · {{ day.booking.source_name }}: {{ day.booking.title }}{% else %}{{ day.price|rub }} ₽{% endif %}">
           <span class="num">{{ day.date.day }}</span>
-          {% if day.ending and day.ending != day.booking %}<span class="tail" style="--c: {{ day.ending.color }}"></span>{% endif %}
+          {% if day.ending and day.ending != day.booking %}<span class="tail{% if day.ending.is_request %} req{% endif %}" style="--c: {{ day.ending.color }}"></span>{% endif %}
           {% if day.booking %}
             <span class="bar{% if day.is_start %} start{% endif %}" style="--c: {{ day.booking.color }}"></span>
-            {% if day.show_label %}<span class="lbl{% if day.is_start %} start{% endif %}" style="--span: {{ day.label_span }}">{{ day.booking.title }}</span>{% endif %}
+            {% if day.show_label %}<span class="lbl{% if day.is_start %} start{% endif %}" style="--span: {{ day.label_span }}">{% if day.booking.is_request %}Заявка · {% endif %}{{ day.booking.title }}</span>{% endif %}
           {% elif not day.is_past %}
             <span class="price">{{ day.price|short_price }}</span>
           {% endif %}
@@ -51,6 +51,7 @@
   <span><span class="dot" style="--c:#2E7D32"></span> Напрямую</span>
   {% for ch in channels %}<span><span class="dot" style="--c:{{ ch.color }}"></span> {{ ch.name }}</span>{% endfor %}
   <span><span class="dot" style="--c:#9AA0A6"></span> Закрыто</span>
+  <span><span class="dot dot-request" style="--c:#2E7D32"></span> Заявка (на площадки не уходит)</span>
 </div>
 
 <section class="card">
@@ -61,7 +62,7 @@
     <li>
       <span class="dot" style="--c: {{ b.color }}"></span>
       <a href="{% url 'booking_edit' b.pk %}" class="dates">{{ b.check_in|date:"d.m" }} – {{ b.check_out|date:"d.m.Y" }}</a>
-      <a href="{% url 'booking_edit' b.pk %}">{{ b.title }} <span class="muted small">· {{ b.source_name }} · {{ b.nights }} н.{% if b.balance_due %} · к оплате {{ b.balance_due|rub }} ₽{% endif %}</span></a>
+      <a href="{% url 'booking_edit' b.pk %}">{% if b.is_request %}<span class="status status-request">Заявка</span> {% endif %}{{ b.title }} <span class="muted small">· {{ b.source_name }} · {{ b.nights }} н.{% if b.kind == 'booking' and b.balance_due and b.balance_due > 0 %} · <span class="due-text">к оплате {{ b.balance_due|rub }} ₽</span>{% endif %}</span></a>
     </li>
     {% endfor %}
   </ul>

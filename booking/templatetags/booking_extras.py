@@ -25,3 +25,26 @@ def short_price(value):
         k = v / 1000
         return (f"{k:.1f}".rstrip("0").rstrip(".").replace(".", ",")) + "к"
     return str(v)
+
+
+@register.filter
+def abs_int(value):
+    try:
+        return abs(int(value))
+    except (TypeError, ValueError):
+        return value
+
+
+@register.filter
+def ru_plural(value, forms):
+    """3|ru_plural:"бронь,брони,броней" -> «брони»."""
+    try:
+        n = abs(int(value))
+    except (TypeError, ValueError):
+        return ""
+    one, few, many = forms.split(",")
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many

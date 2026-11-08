@@ -12,6 +12,8 @@
     </div>
     <p>{{ form.import_url.label_tag }}{{ form.import_url }}{{ form.import_url.errors }}
       <span class="helptext">Ссылка на календарь площадки в формате iCal (см. инструкцию ниже).</span></p>
+    <p>{{ form.commission_percent.label_tag }}{{ form.commission_percent }}{{ form.commission_percent.errors }}
+      <span class="helptext">{{ form.commission_percent.help_text }}</span></p>
     <p><label>{{ form.is_active }} {{ form.is_active.label }}</label></p>
     <button class="btn primary" type="submit">Сохранить</button>
   </form>

@@ -3,7 +3,9 @@ from datetime import date, time
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.core.validators import MinValueValidator
 from django.db.models import Q
+from django.utils import timezone
 
 
 def new_token() -> str:
@@ -121,6 +123,13 @@ class Channel(models.Model):
     import_url = models.URLField("Ссылка на календарь площадки (iCal)", max_length=1000, blank=True)
     export_token = models.CharField(max_length=64, unique=True, default=new_token, editable=False)
     is_active = models.BooleanField("Синхронизировать", default=True)
+    commission_percent = models.DecimalField(
+        "Комиссия площадки, %",
+        max_digits=4,
+        decimal_places=1,
+        default=0,
+        help_text="Для статистики: какой процент от суммы брони удерживает площадка.",
+    )
 
     last_sync_at = models.DateTimeField("Последняя синхронизация", null=True, blank=True)
     last_sync_ok = models.BooleanField(null=True, blank=True)
@@ -138,7 +147,12 @@ class Channel(models.Model):
 
 class BookingQuerySet(models.QuerySet):
     def active(self):
-        return self.filter(status=Booking.Status.ACTIVE)
+        """Брони и заявки — всё, что занимает даты в календаре (кроме отменённых)."""
+        return self.exclude(status=Booking.Status.CANCELLED)
+
+    def confirmed(self):
+        """Только подтверждённые брони: они закрывают даты на площадках и идут в выручку."""
+        return self.filter(status=Booking.Status.CONFIRMED)
 
     def overlapping(self, check_in: date, check_out: date):
         """Брони, у которых есть хотя бы одна общая ночь с периодом [check_in, check_out)."""
@@ -147,15 +161,22 @@ class BookingQuerySet(models.QuerySet):
 
 class Booking(models.Model):
     class Kind(models.TextChoices):
-        BOOKING = "booking", "Бронь"
+        BOOKING = "booking", "Гости"
         BLOCK = "block", "Закрыто"
 
     class Status(models.TextChoices):
-        ACTIVE = "active", "Действует"
-        CANCELLED = "cancelled", "Отменена"
+        CONFIRMED = "confirmed", "Бронь"
+        REQUEST = "request", "Заявка"
+        CANCELLED = "cancelled", "Отмена"
 
     kind = models.CharField("Тип", max_length=10, choices=Kind.choices, default=Kind.BOOKING)
-    status = models.CharField("Статус", max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    status = models.CharField(
+        "Статус",
+        max_length=10,
+        choices=Status.choices,
+        default=Status.CONFIRMED,
+        help_text="Заявка занимает даты в календаре, но не закрывает их на площадках.",
+    )
     check_in = models.DateField("Заезд")
     check_out = models.DateField("Выезд")
 
@@ -172,7 +193,6 @@ class Booking(models.Model):
     phone = models.CharField("Телефон", max_length=50, blank=True)
     guests = models.PositiveSmallIntegerField("Гостей", null=True, blank=True)
     total_price = models.PositiveIntegerField("Сумма, ₽", null=True, blank=True)
-    prepaid = models.PositiveIntegerField("Предоплата, ₽", default=0)
     comment = models.TextField("Комментарий", blank=True)
 
     # Для броней, импортированных из iCal площадки
@@ -221,10 +241,58 @@ class Booking(models.Model):
         return self.channel.color if self.channel else "#2E7D32"
 
     @property
+    def is_request(self) -> bool:
+        return self.status == self.Status.REQUEST
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.status == self.Status.CANCELLED
+
+    # ---- оплаты (используйте prefetch_related("payments") в списках)
+
+    @property
+    def paid(self) -> int:
+        return sum(p.signed_amount for p in self.payments.all())
+
+    @property
     def balance_due(self) -> int | None:
+        """Остаток к оплате. Отрицательный — переплата (нужно вернуть гостю)."""
         if self.total_price is None:
             return None
-        return max(self.total_price - self.prepaid, 0)
+        return self.total_price - self.paid
+
+    @property
+    def payment_state(self) -> str:
+        balance = self.balance_due
+        if balance is None:
+            return "unknown"
+        if balance < 0:
+            return "overpaid"
+        if balance == 0:
+            return "paid"
+        return "partial" if self.paid > 0 else "unpaid"
+
+    @property
+    def payment_state_display(self) -> str:
+        return {
+            "unknown": "Сумма не указана",
+            "overpaid": "Переплата",
+            "paid": "Оплачено",
+            "partial": "Частично оплачено",
+            "unpaid": "Не оплачено",
+        }[self.payment_state]
+
+    @property
+    def paid_percent(self) -> int:
+        if not self.total_price:
+            return 0
+        return max(0, min(100, round(self.paid * 100 / self.total_price)))
+
+    @property
+    def commission(self) -> int:
+        if not self.total_price or not self.channel:
+            return 0
+        return round(self.total_price * float(self.channel.commission_percent) / 100)
 
     @property
     def title(self) -> str:
@@ -246,3 +314,37 @@ class SyncLog(models.Model):
         verbose_name = "Журнал синхронизации"
         verbose_name_plural = "Журнал синхронизации"
         ordering = ["-started_at"]
+
+
+class Payment(models.Model):
+    class Kind(models.TextChoices):
+        PAYMENT = "payment", "Оплата"
+        REFUND = "refund", "Возврат"
+
+    class Method(models.TextChoices):
+        CASH = "cash", "Наличные"
+        TRANSFER = "transfer", "Перевод на карту"
+        SBP = "sbp", "СБП"
+        CARD = "card", "Оплата картой"
+        PLATFORM = "platform", "Через площадку"
+        OTHER = "other", "Другое"
+
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payments")
+    date = models.DateField("Дата", default=timezone.localdate)
+    kind = models.CharField("Тип", max_length=10, choices=Kind.choices, default=Kind.PAYMENT)
+    amount = models.PositiveIntegerField("Сумма, ₽", validators=[MinValueValidator(1)])
+    method = models.CharField("Способ", max_length=10, choices=Method.choices, default=Method.TRANSFER)
+    comment = models.CharField("Комментарий", max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Платёж"
+        verbose_name_plural = "Платежи"
+        ordering = ["date", "pk"]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} {self.amount} ₽ ({self.date:%d.%m.%Y})"
+
+    @property
+    def signed_amount(self) -> int:
+        return -self.amount if self.kind == self.Kind.REFUND else self.amount
