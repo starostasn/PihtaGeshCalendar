@@ -113,11 +113,14 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "calendar"
 LOGOUT_REDIRECT_URL = "login"
 
-if not DEBUG:
+# На сервере сервис работает за HTTPS (Caddy). При запуске на своём компьютере (run_local.py)
+# адрес http://127.0.0.1, поэтому там USE_HTTPS=0.
+USE_HTTPS = env_bool("USE_HTTPS", default=not DEBUG)
+if USE_HTTPS:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SESSION_COOKIE_AGE = 60 * 60 * 24 * 30  # месяц, чтобы не логиниться с телефона каждый день
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 30  # месяц, чтобы не логиниться с телефона каждый день
 
 # Telegram-уведомления владельцу (необязательно). Как получить — см. README.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")

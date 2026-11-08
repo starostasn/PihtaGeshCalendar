@@ -1,4 +1,5 @@
 import calendar as pycalendar
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -341,7 +342,10 @@ def channels_view(request):
     for ch in channels:
         ch.export_url = export_url(ch)
     logs = SyncLog.objects.select_related("channel")[:30]
-    return render(request, "booking/channels.html", {"channels": channels, "logs": logs})
+    local_mode = urlsplit(settings.PUBLIC_BASE_URL).hostname in {"127.0.0.1", "localhost"}
+    return render(
+        request, "booking/channels.html", {"channels": channels, "logs": logs, "local_mode": local_mode}
+    )
 
 
 @login_required
