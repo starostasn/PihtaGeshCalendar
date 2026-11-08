@@ -1,0 +1,79 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}Календарь{% endblock %}
+{% block content %}
+{% for ch in failing_channels %}
+  <div class="msg error">Не работает синхронизация с «{{ ch.name }}»: {{ ch.last_sync_message }} — <a href="{% url 'channels' %}">подробнее</a></div>
+{% endfor %}
+{% for a, b, echo in conflicts %}
+  <div class="msg error">
+    ⚠️ Двойная бронь: <a href="{% url 'booking_edit' a.pk %}">{{ a.source_name }} {{ a.check_in|date:"d.m" }}–{{ a.check_out|date:"d.m" }}</a>
+    и <a href="{% url 'booking_edit' b.pk %}">{{ b.source_name }} {{ b.check_in|date:"d.m" }}–{{ b.check_out|date:"d.m" }}</a>.
+    {% if echo %}Даты совпадают полностью — возможно, площадка вернула вашу же бронь.{% endif %}
+  </div>
+{% endfor %}
+
+<div class="cal-head">
+  <h1>Календарь</h1>
+  <a class="btn small" href="?m={{ prev_m }}" aria-label="Предыдущий месяц">←</a>
+  <a class="btn small" href="{% url 'calendar' %}">Сегодня</a>
+  <a class="btn small" href="?m={{ next_m }}" aria-label="Следующий месяц">→</a>
+  <a class="btn small primary" href="{% url 'booking_create' %}">+ Бронь</a>
+</div>
+<p class="muted small">Нажмите на дату заезда, затем на дату выезда — откроется форма брони. Нажмите на бронь, чтобы открыть её.</p>
+
+<div class="months">
+{% for month in months %}
+  <section class="month card">
+    <h2>{{ month.title }}</h2>
+    <div class="cal">
+      {% for wd in weekday_names %}<div class="wd">{{ wd }}</div>{% endfor %}
+      {% for week in month.weeks %}{% for day in week %}
+        <div class="day{% if not day.in_month %} out{% endif %}{% if day.is_past %} past{% endif %}{% if day.is_today %} today{% endif %}{% if day.booking %} busy{% else %} free{% endif %}{% if day.conflict %} conflict{% endif %}"
+             data-date="{{ day.date|date:'Y-m-d' }}"{% if day.booking %} data-booking="{% url 'booking_edit' day.booking.pk %}"{% endif %}
+             title="{% if day.booking %}{{ day.booking.source_name }}: {{ day.booking.title }}{% else %}{{ day.price|rub }} ₽{% endif %}">
+          <span class="num">{{ day.date.day }}</span>
+          {% if day.ending and day.ending != day.booking %}<span class="tail" style="--c: {{ day.ending.color }}"></span>{% endif %}
+          {% if day.booking %}
+            <span class="bar{% if day.is_start %} start{% endif %}" style="--c: {{ day.booking.color }}"></span>
+            {% if day.show_label %}<span class="lbl{% if day.is_start %} start{% endif %}" style="--span: {{ day.label_span }}">{{ day.booking.title }}</span>{% endif %}
+          {% elif not day.is_past %}
+            <span class="price">{{ day.price|short_price }}</span>
+          {% endif %}
+        </div>
+      {% endfor %}{% endfor %}
+    </div>
+  </section>
+{% endfor %}
+</div>
+
+<div class="legend">
+  <span><span class="dot" style="--c:#2E7D32"></span> Напрямую</span>
+  {% for ch in channels %}<span><span class="dot" style="--c:{{ ch.color }}"></span> {{ ch.name }}</span>{% endfor %}
+  <span><span class="dot" style="--c:#9AA0A6"></span> Закрыто</span>
+</div>
+
+<section class="card">
+  <h2 style="margin-top:0">Ближайшие брони</h2>
+  {% if upcoming %}
+  <ul class="blist">
+    {% for b in upcoming %}
+    <li>
+      <span class="dot" style="--c: {{ b.color }}"></span>
+      <a href="{% url 'booking_edit' b.pk %}" class="dates">{{ b.check_in|date:"d.m" }} – {{ b.check_out|date:"d.m.Y" }}</a>
+      <a href="{% url 'booking_edit' b.pk %}">{{ b.title }} <span class="muted small">· {{ b.source_name }} · {{ b.nights }} н.{% if b.balance_due %} · к оплате {{ b.balance_due|rub }} ₽{% endif %}</span></a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">Броней пока нет.</p>{% endif %}
+</section>
+
+<div class="select-hint" id="selectHint">
+  <span id="selectText">Выберите дату выезда</span>
+  <button class="btn small" type="button" id="selectCancel">Отмена</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.BOOKING_NEW_URL = "{% url 'booking_create' %}";</script>
+<script src="{% static 'booking/calendar.js' %}"></script>
+{% endblock %}

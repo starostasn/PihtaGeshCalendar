@@ -1,0 +1,67 @@
+{% extends "booking/base.html" %}
+{% load booking_extras %}
+{% block title %}Цены{% endblock %}
+{% block content %}
+<h1>Цены</h1>
+<p class="muted small">Цена ночи = базовая цена, если на эту дату не действует правило. Из нескольких правил действует правило с бо́льшим приоритетом.
+  Цены на площадках по iCal не передаются — на Авито их нужно выставить вручную (позже можно подключить API Авито).</p>
+
+<section class="card">
+  <h2 style="margin-top:0">Ближайшие 14 ночей</h2>
+  <div class="scroll-x">
+  <table class="list">
+    <tr>{% for n in preview %}<th>{{ n.night|date:"D d.m" }}</th>{% endfor %}</tr>
+    <tr>{% for n in preview %}<td title="{% if n.rule %}{{ n.rule.name }}{% else %}Базовая цена{% endif %}">{{ n.price|rub }}{% if n.rule %}<br><span class="muted small">{{ n.rule.name|truncatechars:14 }}</span>{% endif %}</td>{% endfor %}</tr>
+  </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Изменить цену на период</h2>
+  <form method="post" class="form">{% csrf_token %}
+    {{ period_form.non_field_errors }}
+    <div class="grid2">
+      {% for f in period_form %}<p>{{ f.label_tag }}{{ f }}{{ f.errors }}</p>{% endfor %}
+    </div>
+    <button class="btn primary" name="save_period" type="submit">Применить</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">Правила</h2>
+    <div class="row">
+      <a class="btn small" href="{% url 'rule_create' %}?preset=weekend">+ Цена выходных</a>
+      <a class="btn small primary" href="{% url 'rule_create' %}">+ Правило (сезон)</a>
+    </div>
+  </div>
+  {% if rules %}
+  <div class="scroll-x">
+  <table class="list">
+    <tr><th>Название</th><th>Период</th><th>Дни</th><th>Цена</th><th>Мин. срок</th><th>Приоритет</th><th></th></tr>
+    {% for r in rules %}
+    <tr{% if not r.is_active %} class="muted"{% endif %}>
+      <td><a href="{% url 'rule_edit' r.pk %}">{{ r.name }}</a>{% if not r.is_active %} <span class="badge">выкл.</span>{% endif %}</td>
+      <td>{% if r.date_from or r.date_to %}{{ r.date_from|date:"d.m.Y"|default:"…" }} – {{ r.date_to|date:"d.m.Y"|default:"…" }}{% else %}всегда{% endif %}</td>
+      <td>{{ r.weekdays_display }}</td>
+      <td>{{ r.price|rub }}</td>
+      <td>{{ r.min_stay|default:"—" }}</td>
+      <td>{{ r.priority }}</td>
+      <td><form class="inline" method="post" action="{% url 'rule_delete' r.pk %}" onsubmit="return confirm('Удалить правило?')">{% csrf_token %}<button class="btn small danger" type="submit">Удалить</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}<p class="muted">Правил нет — везде действует базовая цена.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Дом и базовая цена</h2>
+  <form method="post" class="form">{% csrf_token %}
+    <div class="grid2">
+      {% for f in house_form %}<p>{{ f.label_tag }}{{ f }}{{ f.errors }}</p>{% endfor %}
+    </div>
+    <button class="btn primary" name="save_house" type="submit">Сохранить</button>
+  </form>
+</section>
+{% endblock %}

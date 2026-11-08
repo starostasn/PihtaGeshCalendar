@@ -1,0 +1,28 @@
+{% extends "booking/base.html" %}
+{% load booking_extras %}
+{% block title %}Брони{% endblock %}
+{% block content %}
+<div class="cal-head">
+  <h1>Брони</h1>
+  <a class="btn small{% if show == 'upcoming' %} primary{% endif %}" href="?show=upcoming">Будущие</a>
+  <a class="btn small{% if show == 'past' %} primary{% endif %}" href="?show=past">Прошедшие</a>
+  <a class="btn small{% if show == 'cancelled' %} primary{% endif %}" href="?show=cancelled">Отменённые</a>
+</div>
+<div class="card scroll-x">
+  {% if bookings %}
+  <table class="list">
+    <tr><th>Даты</th><th>Гость</th><th>Источник</th><th>Сумма</th><th>Оплачено</th>{% if show == 'cancelled' %}<th>Причина</th>{% endif %}</tr>
+    {% for b in bookings %}
+    <tr>
+      <td><a href="{% url 'booking_edit' b.pk %}">{{ b.check_in|date:"d.m.Y" }} – {{ b.check_out|date:"d.m.Y" }}</a><br><span class="muted small">{{ b.nights }} н.</span></td>
+      <td>{{ b.title }}{% if b.phone %}<br><a class="small" href="tel:{{ b.phone }}">{{ b.phone }}</a>{% endif %}</td>
+      <td><span class="dot" style="--c: {{ b.color }}"></span> {{ b.source_name }}</td>
+      <td>{{ b.total_price|rub }}</td>
+      <td>{{ b.prepaid|rub }}</td>
+      {% if show == 'cancelled' %}<td class="small">{{ b.cancel_reason }}</td>{% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Ничего нет.</p>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}{% if is_new %}Новая бронь{% else %}{{ booking.title }}{% endif %}{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px">
+  <a href="{% url 'calendar' %}{% if booking %}?m={{ booking.check_in|date:'Y-m' }}{% endif %}">← Календарь</a>
+</div>
+<div class="card">
+  <h1>{% if is_new %}Новая бронь{% else %}{{ booking.get_kind_display }}: {{ booking.title }}{% endif %}</h1>
+
+  {% if booking and booking.status == 'cancelled' %}
+    <div class="msg warning">Отменена{% if booking.cancel_reason %}: {{ booking.cancel_reason }}{% endif %}.</div>
+  {% endif %}
+  {% if booking and booking.is_imported %}
+    <div class="msg warning small">
+      Бронь пришла с площадки «{{ booking.source_name }}» по iCal{% if booking.external_summary %} («{{ booking.external_summary }}»){% endif %}.
+      Даты меняются только на площадке — здесь можно дописать гостя, сумму и комментарий.
+    </div>
+  {% endif %}
+
+  <form method="post" class="form" id="bookingForm" data-quote-url="{% url 'quote_api' %}"{% if booking %} data-exclude="{{ booking.pk }}"{% endif %}>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <p>{{ form.kind }}</p>
+    <div class="grid2">
+      <p>{{ form.check_in.label_tag }}{{ form.check_in }}{{ form.check_in.errors }}</p>
+      <p>{{ form.check_out.label_tag }}{{ form.check_out }}{{ form.check_out.errors }}</p>
+    </div>
+    <div class="quote" id="quote" hidden></div>
+    <div class="grid2 booking-only">
+      <p>{{ form.guest_name.label_tag }}{{ form.guest_name }}{{ form.guest_name.errors }}</p>
+      <p>{{ form.phone.label_tag }}{{ form.phone }}{{ form.phone.errors }}</p>
+      <p>{{ form.guests.label_tag }}{{ form.guests }}{{ form.guests.errors }}<span class="helptext">Максимум {{ house.max_guests }}</span></p>
+      <p>{{ form.channel.label_tag }}{{ form.channel }}{{ form.channel.errors }}</p>
+      <p>{{ form.total_price.label_tag }}{{ form.total_price }}{{ form.total_price.errors }}</p>
+      <p>{{ form.prepaid.label_tag }}{{ form.prepaid }}{{ form.prepaid.errors }}</p>
+    </div>
+    <p>{{ form.comment.label_tag }}{{ form.comment }}{{ form.comment.errors }}</p>
+    <div class="row">
+      <button class="btn primary" type="submit">Сохранить</button>
+      <a class="btn" href="{% url 'calendar' %}">Отмена</a>
+    </div>
+  </form>
+</div>
+
+{% if booking %}
+<div class="card row">
+  {% if booking.status == 'active' %}
+  <form class="inline" method="post" action="{% url 'booking_cancel' booking.pk %}" onsubmit="return confirm('Отменить бронь и освободить даты?')">
+    {% csrf_token %}<button class="btn danger" type="submit">{% if booking.kind == 'block' %}Открыть даты{% else %}Отменить бронь{% endif %}</button>
+  </form>
+  {% else %}
+  <form class="inline" method="post" action="{% url 'booking_restore' booking.pk %}">
+    {% csrf_token %}<button class="btn" type="submit">Восстановить</button>
+  </form>
+  {% endif %}
+  <span class="muted small">Создана {{ booking.created_at|date:"d.m.Y H:i" }}, изменена {{ booking.updated_at|date:"d.m.Y H:i" }}</span>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'booking/booking_form.js' %}"></script>{% endblock %}

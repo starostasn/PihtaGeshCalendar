@@ -1,0 +1,42 @@
+{% extends "booking/base.html" %}
+{% block title %}{% if channel %}{{ channel.name }}{% else %}Новая площадка{% endif %}{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'channels' %}">← Площадки</a></div>
+<div class="card">
+  <h1>{% if channel %}{{ channel.name }}{% else %}Новая площадка{% endif %}</h1>
+  <form method="post" class="form">{% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="grid2">
+      <p>{{ form.name.label_tag }}{{ form.name }}{{ form.name.errors }}</p>
+      <p>{{ form.color.label_tag }}{{ form.color }}{{ form.color.errors }}</p>
+    </div>
+    <p>{{ form.import_url.label_tag }}{{ form.import_url }}{{ form.import_url.errors }}
+      <span class="helptext">Ссылка на календарь площадки в формате iCal (см. инструкцию ниже).</span></p>
+    <p><label>{{ form.is_active }} {{ form.is_active.label }}</label></p>
+    <button class="btn primary" type="submit">Сохранить</button>
+  </form>
+</div>
+
+{% if channel %}
+<div class="card">
+  <h2 style="margin-top:0">Наш календарь для «{{ channel.name }}»</h2>
+  <code class="url">{{ export_url }}</code>
+  <p class="small muted">В него попадают все занятые даты, кроме броней, пришедших с самой «{{ channel.name }}».</p>
+  <form method="post" action="{% url 'channel_new_token' channel.pk %}" onsubmit="return confirm('Старая ссылка перестанет работать. Продолжить?')">
+    {% csrf_token %}<button class="btn small danger" type="submit">Сменить ссылку</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card small">
+  <h2 style="margin-top:0">Как подключить Авито</h2>
+  <ol>
+    <li>Сохраните площадку здесь — появится ссылка «Наш календарь».</li>
+    <li>На <b>сайте</b> Авито (в приложении этой настройки нет) откройте объявление → «Управлять календарём» → «Синхронизировать календарь с другого сайта».</li>
+    <li>Скопируйте ссылку «Ваш календарь на Авито» и вставьте её сюда в поле «Ссылка на календарь площадки», сохраните.</li>
+    <li>Ссылку «Наш календарь» вставьте на Авито в поле для календаря другого сервиса и нажмите «Добавить».</li>
+    <li>Нажмите «Синхронизировать сейчас» на странице площадок и проверьте, что брони с Авито появились в календаре.</li>
+  </ol>
+  <p class="muted">Для других площадок (Суточно, ТВИЛ, Циан и т.д.) порядок такой же: найдите в настройках объекта раздел синхронизации iCal.</p>
+</div>
+{% endblock %}

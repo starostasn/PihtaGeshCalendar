@@ -1,0 +1,24 @@
+{% extends "booking/base.html" %}
+{% block title %}Правило цены{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'prices' %}">← Цены</a></div>
+<div class="card">
+  <h1>{% if rule %}{{ rule.name }}{% else %}Новое правило{% endif %}</h1>
+  <form method="post" class="form">{% csrf_token %}
+    {{ form.non_field_errors }}
+    <p>{{ form.name.label_tag }}{{ form.name }}{{ form.name.errors }}</p>
+    <div class="grid2">
+      <p>{{ form.date_from.label_tag }}{{ form.date_from }}{{ form.date_from.errors }}<span class="helptext">Пусто — без ограничения</span></p>
+      <p>{{ form.date_to.label_tag }}{{ form.date_to }}{{ form.date_to.errors }}</p>
+    </div>
+    <p>{{ form.weekdays.label_tag }}{{ form.weekdays }}{{ form.weekdays.errors }}<span class="helptext">{{ form.weekdays.help_text }}</span></p>
+    <div class="grid2">
+      <p>{{ form.price.label_tag }}{{ form.price }}{{ form.price.errors }}</p>
+      <p>{{ form.min_stay.label_tag }}{{ form.min_stay }}{{ form.min_stay.errors }}<span class="helptext">{{ form.min_stay.help_text }}</span></p>
+      <p>{{ form.priority.label_tag }}{{ form.priority }}{{ form.priority.errors }}<span class="helptext">{{ form.priority.help_text }}</span></p>
+      <p><label>{{ form.is_active }} {{ form.is_active.label }}</label></p>
+    </div>
+    <button class="btn primary" type="submit">Сохранить</button>
+  </form>
+</div>
+{% endblock %}

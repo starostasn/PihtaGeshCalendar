@@ -1,0 +1,53 @@
+{% extends "booking/base.html" %}
+{% block title %}Площадки{% endblock %}
+{% block content %}
+<div class="cal-head">
+  <h1>Площадки</h1>
+  <a class="btn small primary" href="{% url 'channel_create' %}">+ Площадка</a>
+</div>
+<p class="muted small">Синхронизация по iCal: каждые несколько минут мы забираем занятые даты с площадки, а площадка забирает наш календарь.
+  Передаются только даты — без цен и данных гостя.</p>
+
+{% for ch in channels %}
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0"><span class="dot" style="--c: {{ ch.color }}"></span> {{ ch.name }}{% if not ch.is_active %} <span class="badge">выключена</span>{% endif %}</h2>
+    <div class="row">
+      {% if ch.import_url %}
+      <form class="inline" method="post" action="{% url 'channel_sync' ch.pk %}">{% csrf_token %}<button class="btn small" type="submit">Синхронизировать сейчас</button></form>
+      {% endif %}
+      <a class="btn small" href="{% url 'channel_edit' ch.pk %}">Настроить</a>
+    </div>
+  </div>
+  <p class="small">
+    <b>Забираем с площадки:</b>
+    {% if not ch.import_url %}<span class="badge warn">ссылка не указана</span>
+    {% elif ch.last_sync_ok is None %}<span class="badge">ещё не было</span>
+    {% elif ch.last_sync_ok %}<span class="badge ok">OK</span> {{ ch.last_sync_at|timesince }} назад — {{ ch.last_sync_message }}
+    {% else %}<span class="badge err">ошибка</span> {{ ch.last_sync_at|timesince }} назад — {{ ch.last_sync_message }}{% endif %}
+    <br>
+    <b>Площадка забирает наш календарь:</b>
+    {% if ch.last_exported_at %}{{ ch.last_exported_at|timesince }} назад{% else %}<span class="badge warn">ещё ни разу</span> — вставьте ссылку ниже на площадке{% endif %}
+  </p>
+  <p class="small" style="margin-bottom:4px"><b>Наш календарь для «{{ ch.name }}»</b> (вставьте на площадке):</p>
+  <code class="url" id="url{{ ch.pk }}">{{ ch.export_url }}</code>
+  <button class="btn small" type="button" onclick="navigator.clipboard.writeText(document.getElementById('url{{ ch.pk }}').textContent); this.textContent='Скопировано'">Копировать</button>
+</section>
+{% empty %}
+<div class="card">
+  <p>Площадок пока нет. <a href="{% url 'channel_create' %}">Добавьте Авито</a> — займёт пару минут.</p>
+</div>
+{% endfor %}
+
+<section class="card scroll-x">
+  <h2 style="margin-top:0">Журнал синхронизации</h2>
+  {% if logs %}
+  <table class="list small">
+    <tr><th>Когда</th><th>Площадка</th><th>Результат</th></tr>
+    {% for l in logs %}
+    <tr><td>{{ l.started_at|date:"d.m H:i" }}</td><td>{{ l.channel.name }}</td><td>{% if l.ok %}<span class="badge ok">OK</span>{% else %}<span class="badge err">ошибка</span>{% endif %} {{ l.message }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Пока пусто.</p>{% endif %}
+</section>
+{% endblock %}

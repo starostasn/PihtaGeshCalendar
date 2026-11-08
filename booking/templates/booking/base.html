@@ -1,0 +1,31 @@
+{% load static %}<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}Календарь{% endblock %} · {{ house.name|default:"Гостевой дом" }}</title>
+  <link rel="stylesheet" href="{% static 'booking/style.css' %}">
+</head>
+<body>
+{% if user.is_authenticated %}
+<header class="topbar">
+  <a class="brand" href="{% url 'calendar' %}">🏡 {{ house.name|default:"Гостевой дом" }}</a>
+  <nav>
+    {% with u=request.resolver_match.url_name %}
+    <a href="{% url 'calendar' %}" class="{% if u == 'calendar' %}active{% endif %}">Календарь</a>
+    <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}">Брони</a>
+    <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}">Цены</a>
+    <a href="{% url 'channels' %}" class="{% if u == 'channels' or u == 'channel_edit' or u == 'channel_create' %}active{% endif %}">Площадки</a>
+    {% endwith %}
+    <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" title="Выйти">Выйти</button></form>
+  </nav>
+</header>
+{% endif %}
+<main>
+  {% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>
