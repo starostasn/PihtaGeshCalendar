@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 from .forms import BookingForm, ChannelForm, HouseForm, PaymentForm, PeriodPriceForm, PriceRuleForm
 from .ical import build_export, sync_channel
 from .models import Booking, Channel, House, Payment, PriceRule, SyncLog
+from .permissions import admin_required, forbidden, is_admin
 from .pricing import PriceCalculator
 from .services import OverlapError, conflict_pairs, is_possible_echo, save_booking
 from .stats import PRESETS, build_dashboard, resolve_period
@@ -158,6 +159,8 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
         form = BookingForm(request.POST, instance=booking)
         if form.is_valid():
             obj = form.save(commit=False)
+            if is_new:
+                obj.created_by = request.user
             try:
                 save_booking(obj)
             except OverlapError as exc:
@@ -169,7 +172,7 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
                     )
             else:
                 if is_new:
-                    form.save_initial_payment(obj)
+                    form.save_initial_payment(obj, request.user)
                 if obj.kind == Booking.Kind.BLOCK:
                     text = "Даты открыты" if obj.is_cancelled else "Даты закрыты"
                 else:
@@ -226,12 +229,13 @@ def payment_add(request, pk: int):
         return _booking_form_view(request, booking, payment_form=form)
     payment = form.save(commit=False)
     payment.booking = booking
+    payment.created_by = request.user
     payment.save()
     messages.success(request, f"{payment.get_kind_display()} {payment.amount:,} ₽ добавлена".replace(",", "\u00a0"))
     return redirect(f"{reverse('booking_edit', args=[pk])}#payments")
 
 
-@login_required
+@admin_required
 @require_POST
 def payment_delete(request, pk: int):
     payment = get_object_or_404(Payment, pk=pk)
@@ -296,6 +300,8 @@ def prices_view(request):
     house_form = HouseForm(instance=house, prefix="house")
     period_form = PeriodPriceForm(prefix="period")
     if request.method == "POST":
+        if not is_admin(request.user):
+            return forbidden(request, "Цены меняет администратор.")
         if "save_house" in request.POST:
             house_form = HouseForm(request.POST, instance=house, prefix="house")
             if house_form.is_valid():
@@ -326,7 +332,7 @@ def prices_view(request):
     )
 
 
-@login_required
+@admin_required
 def rule_edit(request, pk: int | None = None):
     rule = get_object_or_404(PriceRule, pk=pk) if pk else None
     if request.method == "POST":
@@ -343,7 +349,7 @@ def rule_edit(request, pk: int | None = None):
     return render(request, "booking/rule_form.html", {"form": form, "rule": rule})
 
 
-@login_required
+@admin_required
 @require_POST
 def rule_delete(request, pk: int):
     get_object_or_404(PriceRule, pk=pk).delete()
@@ -358,7 +364,7 @@ def export_url(channel: Channel) -> str:
     return settings.PUBLIC_BASE_URL.rstrip("/") + reverse("ical_export", args=[channel.export_token])
 
 
-@login_required
+@admin_required
 def channels_view(request):
     channels = list(Channel.objects.all())
     for ch in channels:
@@ -370,7 +376,7 @@ def channels_view(request):
     )
 
 
-@login_required
+@admin_required
 def channel_edit(request, pk: int | None = None):
     channel = get_object_or_404(Channel, pk=pk) if pk else None
     if request.method == "POST":
@@ -388,7 +394,7 @@ def channel_edit(request, pk: int | None = None):
     )
 
 
-@login_required
+@admin_required
 @require_POST
 def channel_sync(request, pk: int):
     channel = get_object_or_404(Channel, pk=pk)
@@ -409,7 +415,7 @@ def channel_sync(request, pk: int):
     return redirect("channels")
 
 
-@login_required
+@admin_required
 @require_POST
 def channel_new_token(request, pk: int):
     from .models import new_token

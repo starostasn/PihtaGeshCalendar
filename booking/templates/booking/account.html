@@ -1,0 +1,27 @@
+{% extends "booking/base.html" %}
+{% block title %}Профиль{% endblock %}
+{% block content %}
+<h1>Профиль</h1>
+<div class="card">
+  <p style="margin-top:0">Логин: <b>{{ user.username }}</b> · роль: {% if is_admin %}<span class="role role-admin">Администратор</span>{% else %}<span class="role role-manager">Менеджер</span>{% endif %}</p>
+  <form method="post" class="form">
+    {% csrf_token %}
+    <p>{{ profile_form.first_name.label_tag }}{{ profile_form.first_name }}{{ profile_form.first_name.errors }}<span class="helptext">Так вас видят другие в календаре — например, кто создал бронь или внёс платёж</span></p>
+    <button class="btn primary" type="submit">Сохранить</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Сменить пароль</h2>
+  <form method="post" class="form">
+    {% csrf_token %}
+    {{ password_form.non_field_errors }}
+    <p>{{ password_form.old_password.label_tag }}{{ password_form.old_password }}{{ password_form.old_password.errors }}</p>
+    <div class="grid2">
+      <p>{{ password_form.new_password1.label_tag }}{{ password_form.new_password1 }}{{ password_form.new_password1.errors }}</p>
+      <p>{{ password_form.new_password2.label_tag }}{{ password_form.new_password2 }}{{ password_form.new_password2.errors }}</p>
+    </div>
+    <button class="btn" name="change_password" type="submit">Сменить пароль</button>
+  </form>
+</div>
+<form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn danger" type="submit">Выйти из календаря</button></form>
+{% endblock %}

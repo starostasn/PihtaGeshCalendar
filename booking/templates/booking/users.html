@@ -1,0 +1,84 @@
+{% extends "booking/base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<div class="cal-head">
+  <h1>Пользователи</h1>
+  <a class="btn small" href="{% url 'user_create' %}">+ Создать вручную</a>
+  <a class="btn small primary" href="#invites">+ Пригласить по ссылке</a>
+</div>
+
+<div class="roles-help">
+  <div><span class="role role-admin">Администратор</span> <span class="muted small">{{ role_help.admin }}</span></div>
+  <div><span class="role role-manager">Менеджер</span> <span class="muted small">{{ role_help.manager }}</span></div>
+</div>
+
+<section class="card scroll-x">
+  <table class="list">
+    <tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Статус</th><th>Последний вход</th><th></th></tr>
+    {% for u in users %}
+    <tr{% if not u.is_active %} class="muted"{% endif %}>
+      <td><a href="{% url 'user_edit' u.pk %}"><b>{{ u.get_full_name|default:u.username }}</b></a>{% if u.pk == user.pk %} <span class="badge">это вы</span>{% endif %}</td>
+      <td>{{ u.username }}</td>
+      <td>{% if u.is_superuser %}<span class="role role-admin">Администратор</span>{% else %}<span class="role role-manager">Менеджер</span>{% endif %}</td>
+      <td>{% if u.is_active %}<span class="badge ok">Активен</span>{% else %}<span class="badge err">Заблокирован</span>{% endif %}</td>
+      <td class="small">{% if u.last_login %}{{ u.last_login|date:"d.m.Y H:i" }}{% else %}<span class="muted">ещё не входил</span>{% endif %}</td>
+      <td class="num"><a class="btn small" href="{% url 'user_edit' u.pk %}">Изменить</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card" id="invites">
+  <h2 style="margin-top:0">Приглашения</h2>
+  <p class="muted small">Создайте ссылку и отправьте её человеку в мессенджер. По ссылке он сам придумает логин и пароль
+    и сразу попадёт в календарь с выбранной ролью. Ссылка одноразовая и действует 7 дней.</p>
+
+  <form method="post" action="{% url 'invite_create' %}" class="form invite-form">
+    {% csrf_token %}
+    <p>{{ invite_form.name.label_tag }}{{ invite_form.name }}<span class="helptext">{{ invite_form.name.help_text }}</span></p>
+    <div class="field">
+      <label>Роль</label>
+      <div class="seg">
+        {% for radio in invite_form.role %}<label class="seg-item">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}
+      </div>
+    </div>
+    <p><button class="btn primary" type="submit">Создать ссылку</button></p>
+  </form>
+
+  {% if active_invites %}
+  <h3>Действующие ссылки</h3>
+  <ul class="invite-list">
+    {% for inv in active_invites %}
+    <li>
+      <div class="row" style="justify-content:space-between">
+        <span><b>{{ inv.name|default:"Без имени" }}</b> · {% if inv.role == 'admin' %}<span class="role role-admin">Администратор</span>{% else %}<span class="role role-manager">Менеджер</span>{% endif %}
+          <span class="muted small">· до {{ inv.expires_at|date:"d.m.Y H:i" }}</span></span>
+        <form class="inline" method="post" action="{% url 'invite_revoke' inv.pk %}" onsubmit="return confirm('Отозвать приглашение? Ссылка перестанет работать.')">
+          {% csrf_token %}<button class="btn small danger" type="submit">Отозвать</button>
+        </form>
+      </div>
+      <code class="url" id="inv{{ inv.pk }}">{{ inv.url }}</code>
+      <button class="btn small" type="button" onclick="navigator.clipboard.writeText(document.getElementById('inv{{ inv.pk }}').textContent); this.textContent='Скопировано'">Копировать ссылку</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if other_invites %}
+  <details>
+    <summary class="muted small">Использованные и устаревшие ({{ other_invites|length }})</summary>
+    <table class="list small">
+      <tr><th>Для кого</th><th>Роль</th><th>Статус</th><th>Создано</th></tr>
+      {% for inv in other_invites %}
+      <tr>
+        <td>{{ inv.name|default:"—" }}</td>
+        <td>{% if inv.role == 'admin' %}Администратор{% else %}Менеджер{% endif %}</td>
+        <td>{{ inv.status_display }}{% if inv.used_by %}: {{ inv.used_by.get_full_name|default:inv.used_by.username }}{% endif %}</td>
+        <td>{{ inv.created_at|date:"d.m.Y" }}{% if inv.created_by %} · {{ inv.created_by.get_full_name|default:inv.created_by.username }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endif %}
+</section>
+{% endblock %}

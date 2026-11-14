@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from booking import views
+from booking import accounts, views
 
 urlpatterns = [
     path("", views.calendar_view, name="calendar"),
@@ -23,7 +23,14 @@ urlpatterns = [
     path("channels/<int:pk>/sync/", views.channel_sync, name="channel_sync"),
     path("channels/<int:pk>/new-token/", views.channel_new_token, name="channel_new_token"),
     path("ical/<str:token>.ics", views.ical_export, name="ical_export"),
-    path("login/", auth_views.LoginView.as_view(template_name="booking/login.html"), name="login"),
+    path("users/", accounts.users_view, name="users"),
+    path("users/new/", accounts.user_create, name="user_create"),
+    path("users/<int:pk>/", accounts.user_edit, name="user_edit"),
+    path("users/invites/", accounts.invite_create, name="invite_create"),
+    path("users/invites/<int:pk>/revoke/", accounts.invite_revoke, name="invite_revoke"),
+    path("invite/<str:token>/", accounts.invite_accept, name="invite_accept"),
+    path("account/", accounts.account_view, name="account"),
+    path("login/", accounts.ThrottledLoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("admin/", admin.site.urls),
 ]

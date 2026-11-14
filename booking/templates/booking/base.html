@@ -17,7 +17,11 @@
     <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}">Брони</a>
     <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}">Цены</a>
     <a href="{% url 'stats' %}" class="{% if u == 'stats' %}active{% endif %}">Статистика</a>
+    {% if is_admin %}
     <a href="{% url 'channels' %}" class="{% if u == 'channels' or u == 'channel_edit' or u == 'channel_create' %}active{% endif %}">Площадки</a>
+    <a href="{% url 'users' %}" class="{% if u == 'users' or u == 'user_edit' or u == 'user_create' %}active{% endif %}">Пользователи</a>
+    {% endif %}
+    <a href="{% url 'account' %}" class="me{% if u == 'account' %} active{% endif %}" title="{{ me_role }} · профиль и пароль">👤 {{ me_name }}</a>
     {% endwith %}
     <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" title="Выйти">Выйти</button></form>
   </nav>

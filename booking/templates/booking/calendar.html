@@ -3,7 +3,7 @@
 {% block title %}Календарь{% endblock %}
 {% block content %}
 {% for ch in failing_channels %}
-  <div class="msg error">Не работает синхронизация с «{{ ch.name }}»: {{ ch.last_sync_message }} — <a href="{% url 'channels' %}">подробнее</a></div>
+  <div class="msg error">Не работает синхронизация с «{{ ch.name }}»: {{ ch.last_sync_message }}{% if is_admin %} — <a href="{% url 'channels' %}">подробнее</a>{% else %} — сообщите администратору{% endif %}</div>
 {% endfor %}
 {% for a, b, echo in conflicts %}
   <div class="msg error">

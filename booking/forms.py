@@ -63,7 +63,7 @@ class BookingForm(forms.ModelForm):
             self.add_error("status", "Закрытые даты не могут быть заявкой — выберите «Бронь» или «Отмена».")
         return data
 
-    def save_initial_payment(self, booking: Booking) -> Payment | None:
+    def save_initial_payment(self, booking: Booking, user=None) -> Payment | None:
         amount = self.cleaned_data.get("initial_payment")
         if not amount or booking.kind != Booking.Kind.BOOKING:
             return None
@@ -72,6 +72,7 @@ class BookingForm(forms.ModelForm):
             amount=amount,
             method=self.cleaned_data.get("initial_payment_method") or Payment.Method.TRANSFER,
             comment="Предоплата",
+            created_by=user,
         )
 
 
@@ -160,3 +161,89 @@ class ChannelForm(forms.ModelForm):
         model = Channel
         fields = ["name", "color", "import_url", "commission_percent", "is_active"]
         widgets = {"color": forms.TextInput(attrs={"type": "color"})}
+
+
+# ---------------------------------------------------------------- пользователи
+
+from django.contrib.auth import get_user_model  # noqa: E402
+from django.contrib.auth.forms import UserCreationForm  # noqa: E402
+
+from .models import Invite  # noqa: E402
+from .permissions import ROLE_CHOICES, ROLE_MANAGER, role_of, set_role  # noqa: E402
+
+User = get_user_model()
+
+
+class RoleField(forms.ChoiceField):
+    def __init__(self, **kwargs):
+        super().__init__(label="Роль", choices=ROLE_CHOICES, widget=forms.RadioSelect, initial=ROLE_MANAGER, **kwargs)
+
+
+class UserCreateForm(UserCreationForm):
+    """Администратор создаёт пользователя сам и задаёт ему пароль."""
+
+    first_name = forms.CharField(label="Имя", max_length=150, required=False, help_text="Как показывать в календаре")
+    role = RoleField()
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ("username", "first_name")
+        labels = {"username": "Логин"}
+        help_texts = {"username": "Латинские буквы, цифры и символы @ . + - _"}
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        set_role(user, self.cleaned_data["role"])
+        if commit:
+            user.save()
+        return user
+
+
+class UserEditForm(forms.ModelForm):
+    role = RoleField()
+
+    class Meta:
+        model = User
+        fields = ("first_name", "is_active")
+        labels = {"first_name": "Имя", "is_active": "Может входить в календарь"}
+        help_texts = {"is_active": "Снимите галочку, чтобы заблокировать доступ (история броней сохранится)."}
+
+    def __init__(self, *args, editing_self: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.initial["role"] = role_of(self.instance)
+        if editing_self:
+            # Нельзя лишить прав или заблокировать самого себя — так в календаре всегда остаётся администратор.
+            self.fields["role"].disabled = True
+            self.fields["is_active"].disabled = True
+            self.fields["role"].help_text = "Свою роль может изменить только другой администратор."
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        set_role(user, self.cleaned_data["role"])
+        if commit:
+            user.save()
+        return user
+
+
+class InviteForm(forms.ModelForm):
+    class Meta:
+        model = Invite
+        fields = ("name", "role")
+        widgets = {"role": forms.RadioSelect}
+
+
+class InviteAcceptForm(UserCreationForm):
+    first_name = forms.CharField(label="Ваше имя", max_length=150, help_text="Так вас будут видеть другие в календаре")
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ("first_name", "username")
+        labels = {"username": "Придумайте логин"}
+        help_texts = {"username": "Латинские буквы, цифры и символы @ . + - _"}
+
+
+class ProfileForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ("first_name",)
+        labels = {"first_name": "Имя"}

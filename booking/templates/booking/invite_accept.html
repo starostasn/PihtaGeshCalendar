@@ -1,0 +1,17 @@
+{% extends "booking/base.html" %}
+{% block title %}Приглашение{% endblock %}
+{% block content %}
+<div class="card" style="max-width:440px;margin:40px auto">
+  <h1>Вас пригласили в календарь</h1>
+  <p class="muted">Роль: <b>{% if invite.role == 'admin' %}администратор{% else %}менеджер{% endif %}</b>. Придумайте логин и пароль — ими вы будете входить.</p>
+  <form method="post" class="form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <p>{{ form.first_name.label_tag }}{{ form.first_name }}{{ form.first_name.errors }}<span class="helptext">{{ form.first_name.help_text }}</span></p>
+    <p>{{ form.username.label_tag }}{{ form.username }}{{ form.username.errors }}<span class="helptext">{{ form.username.help_text }}</span></p>
+    <p>{{ form.password1.label_tag }}{{ form.password1 }}{{ form.password1.errors }}<span class="helptext">Не короче 10 символов</span></p>
+    <p>{{ form.password2.label_tag }}{{ form.password2 }}{{ form.password2.errors }}</p>
+    <button class="btn primary" type="submit">Войти в календарь</button>
+  </form>
+</div>
+{% endblock %}

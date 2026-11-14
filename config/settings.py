@@ -84,6 +84,15 @@ DATABASES = {
     }
 }
 
+# Счётчики неудачных входов (защита от перебора паролей). Файловый кэш общий для всех процессов.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": DATA_DIR / "cache",
+        "TIMEOUT": 15 * 60,
+    }
+}
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},

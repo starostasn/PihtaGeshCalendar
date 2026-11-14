@@ -1,6 +1,7 @@
 import secrets
-from datetime import date, time
+from datetime import date, time, timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.core.validators import MinValueValidator
@@ -200,6 +201,15 @@ class Booking(models.Model):
     external_summary = models.CharField("Описание с площадки", max_length=500, blank=True)
     cancel_reason = models.CharField("Причина отмены", max_length=300, blank=True)
 
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Создал",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -335,6 +345,15 @@ class Payment(models.Model):
     amount = models.PositiveIntegerField("Сумма, ₽", validators=[MinValueValidator(1)])
     method = models.CharField("Способ", max_length=10, choices=Method.choices, default=Method.TRANSFER)
     comment = models.CharField("Комментарий", max_length=300, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Внёс",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -348,3 +367,53 @@ class Payment(models.Model):
     @property
     def signed_amount(self) -> int:
         return -self.amount if self.kind == self.Kind.REFUND else self.amount
+
+
+def invite_expiry():
+    return timezone.now() + timedelta(days=7)
+
+
+class Invite(models.Model):
+    """Одноразовая ссылка-приглашение: по ней человек сам задаёт логин и пароль."""
+
+    ROLE_CHOICES = [("admin", "Администратор"), ("manager", "Менеджер")]
+
+    token = models.CharField(max_length=64, unique=True, default=new_token, editable=False)
+    name = models.CharField("Для кого", max_length=150, blank=True, help_text="Например: Ирина, менеджер")
+    role = models.CharField("Роль", max_length=10, choices=ROLE_CHOICES, default="manager")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField("Действует до", default=invite_expiry)
+    used_at = models.DateTimeField(null=True, blank=True)
+    used_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Приглашение"
+        verbose_name_plural = "Приглашения"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name or f"Приглашение от {self.created_at:%d.%m.%Y}"
+
+    @property
+    def status(self) -> str:
+        if self.used_at:
+            return "used"
+        if self.revoked_at:
+            return "revoked"
+        if self.expires_at <= timezone.now():
+            return "expired"
+        return "active"
+
+    @property
+    def status_display(self) -> str:
+        return {"used": "Использовано", "revoked": "Отозвано", "expired": "Истекло", "active": "Активно"}[self.status]
+
+    @property
+    def is_valid(self) -> bool:
+        return self.status == "active"

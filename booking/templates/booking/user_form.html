@@ -1,0 +1,52 @@
+{% extends "booking/base.html" %}
+{% block title %}{% if is_new %}Новый пользователь{% else %}{{ target.get_full_name|default:target.username }}{% endif %}{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'users' %}">← Пользователи</a></div>
+<div class="card">
+  <h1>{% if is_new %}Новый пользователь{% else %}{{ target.get_full_name|default:target.username }} <span class="muted" style="font-weight:400">· {{ target.username }}</span>{% endif %}</h1>
+  {% if is_new %}<p class="muted small">Удобнее пригласить человека по ссылке — тогда он сам придумает пароль. Здесь пароль задаёте вы и передаёте его лично.</p>{% endif %}
+  <form method="post" class="form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% if is_new %}
+      <div class="grid2">
+        <p>{{ form.username.label_tag }}{{ form.username }}{{ form.username.errors }}<span class="helptext">{{ form.username.help_text }}</span></p>
+        <p>{{ form.first_name.label_tag }}{{ form.first_name }}{{ form.first_name.errors }}<span class="helptext">{{ form.first_name.help_text }}</span></p>
+        <p>{{ form.password1.label_tag }}{{ form.password1 }}{{ form.password1.errors }}<span class="helptext">Не короче 10 символов</span></p>
+        <p>{{ form.password2.label_tag }}{{ form.password2 }}{{ form.password2.errors }}</p>
+      </div>
+    {% else %}
+      <p>{{ form.first_name.label_tag }}{{ form.first_name }}{{ form.first_name.errors }}</p>
+    {% endif %}
+    <div class="field">
+      <label>Роль</label>
+      <div class="seg">
+        {% for radio in form.role %}<label class="seg-item">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}
+      </div>
+      {{ form.role.errors }}
+      <span class="helptext">{% if form.role.help_text %}{{ form.role.help_text }}{% else %}Администратор: {{ role_help.admin }} Менеджер: {{ role_help.manager }}{% endif %}</span>
+    </div>
+    {% if not is_new %}
+      <p><label>{{ form.is_active }} {{ form.is_active.label }}</label><span class="helptext">{% if editing_self %}Заблокировать себя нельзя.{% else %}{{ form.is_active.help_text }}{% endif %}</span></p>
+    {% endif %}
+    <button class="btn primary" type="submit">{% if is_new %}Создать{% else %}Сохранить{% endif %}</button>
+  </form>
+</div>
+
+{% if not is_new %}
+<div class="card">
+  <h2 style="margin-top:0">Новый пароль</h2>
+  <p class="muted small">Если человек забыл пароль — задайте новый и передайте ему. Сменить пароль потом он сможет сам в своём профиле.</p>
+  <form method="post" class="form">
+    {% csrf_token %}
+    {{ password_form.non_field_errors }}
+    <div class="grid2">
+      <p>{{ password_form.new_password1.label_tag }}{{ password_form.new_password1 }}{{ password_form.new_password1.errors }}</p>
+      <p>{{ password_form.new_password2.label_tag }}{{ password_form.new_password2 }}{{ password_form.new_password2.errors }}</p>
+    </div>
+    <button class="btn" name="set_password" type="submit">Задать пароль</button>
+  </form>
+  <p class="muted small" style="margin-bottom:0">Последний вход: {% if target.last_login %}{{ target.last_login|date:"d.m.Y H:i" }}{% else %}ещё не входил{% endif %} · в календаре с {{ target.date_joined|date:"d.m.Y" }}</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -67,7 +67,7 @@
     <div class="row">
       <button class="btn primary" type="submit">Сохранить</button>
       <a class="btn" href="{% url 'calendar' %}">Назад</a>
-      {% if booking %}<span class="muted small">Создана {{ booking.created_at|date:"d.m.Y H:i" }}, изменена {{ booking.updated_at|date:"d.m.Y H:i" }}</span>{% endif %}
+      {% if booking %}<span class="muted small">Создана {{ booking.created_at|date:"d.m.Y H:i" }}{% if booking.created_by %} · {{ booking.created_by.get_full_name|default:booking.created_by.username }}{% elif booking.is_imported %} · синхронизация с площадкой{% endif %}, изменена {{ booking.updated_at|date:"d.m.Y H:i" }}</span>{% endif %}
     </div>
   </form>
 </div>
@@ -98,7 +98,7 @@
   {% if payments %}
   <div class="scroll-x">
   <table class="list">
-    <tr><th>Дата</th><th>Тип</th><th>Способ</th><th class="num">Сумма</th><th>Комментарий</th><th></th></tr>
+    <tr><th>Дата</th><th>Тип</th><th>Способ</th><th class="num">Сумма</th><th>Комментарий</th><th>Внёс</th><th></th></tr>
     {% for p in payments %}
     <tr>
       <td>{{ p.date|date:"d.m.Y" }}</td>
@@ -106,10 +106,13 @@
       <td>{{ p.get_method_display }}</td>
       <td class="num{% if p.kind == 'refund' %} due-text{% endif %}">{% if p.kind == 'refund' %}−{% endif %}{{ p.amount|rub }} ₽</td>
       <td class="small">{{ p.comment }}</td>
+      <td class="small muted">{% if p.created_by %}{{ p.created_by.get_full_name|default:p.created_by.username }}{% endif %}</td>
       <td class="num">
+        {% if is_admin %}
         <form class="inline" method="post" action="{% url 'payment_delete' p.pk %}" onsubmit="return confirm('Удалить платёж?')">
           {% csrf_token %}<button class="btn small danger" type="submit" aria-label="Удалить платёж">Удалить</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

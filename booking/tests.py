@@ -256,7 +256,7 @@ class SyncChannelTests(TestCase):
 
 class ViewTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user("owner", password="very-secret-pass")
+        self.user = User.objects.create_superuser("owner", password="very-secret-pass")
 
     def test_login_required(self):
         resp = self.client.get(reverse("calendar"))
@@ -405,7 +405,7 @@ class StatusTests(TestCase):
 
 class PaymentTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user("owner", password="very-secret-pass")
+        self.user = User.objects.create_superuser("owner", password="very-secret-pass")
         self.client.force_login(self.user)
 
     def test_balance_and_states(self):
@@ -516,3 +516,211 @@ class StatsTests(TestCase):
         resp = self.client.get(reverse("stats"), {"period": "custom", "from": d(-10).isoformat(), "to": d(10).isoformat()})
         self.assertContains(resp, "Ждём оплату")
         self.assertContains(resp, "chart-data")
+
+
+
+# ---------------------------------------------------------------- пользователи и роли
+
+from django.core.cache import cache  # noqa: E402
+from django.test import override_settings  # noqa: E402
+
+from .models import Invite  # noqa: E402
+
+LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+
+class RoleTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.manager = User.objects.create_user("manager", password="very-secret-pass", first_name="Ирина")
+        self.ch = Channel.objects.create(name="Авито")
+        self.rule = PriceRule.objects.create(name="Выходные", weekdays="4,5", price=15000)
+
+    def test_manager_can_work_with_bookings_and_stats(self):
+        self.client.force_login(self.manager)
+        for name in ("calendar", "booking_list", "booking_create", "stats", "prices", "account"):
+            self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+        resp = self.client.post(
+            reverse("booking_create"),
+            {"kind": "booking", "status": "confirmed", "check_in": d(5).isoformat(), "check_out": d(7).isoformat(),
+             "total_price": 20000, "initial_payment": 5000, "initial_payment_method": "cash"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        b = Booking.objects.get()
+        self.assertEqual(b.created_by, self.manager)
+        self.assertEqual(b.payments.get().created_by, self.manager)
+        self.client.post(reverse("payment_add", args=[b.pk]), {"date": d(0).isoformat(), "kind": "payment", "amount": 1000, "method": "cash"})
+        self.assertEqual(b.payments.count(), 2)
+        page = self.client.get(reverse("booking_edit", args=[b.pk]))
+        self.assertContains(page, "Ирина")
+        self.assertNotContains(page, "Удалить платёж")
+
+    def test_manager_cannot_change_prices_channels_users(self):
+        self.client.force_login(self.manager)
+        page = self.client.get(reverse("prices"))
+        self.assertContains(page, "Цены меняет администратор")
+        self.assertNotContains(page, "Изменить цену на период")
+        forbidden = [
+            ("post", reverse("prices"), {"save_period": "1", "period-date_from": d(1).isoformat(),
+                                         "period-date_to": d(2).isoformat(), "period-price": "1"}),
+            ("get", reverse("rule_create"), None),
+            ("get", reverse("rule_edit", args=[self.rule.pk]), None),
+            ("post", reverse("rule_delete", args=[self.rule.pk]), None),
+            ("get", reverse("channels"), None),
+            ("get", reverse("channel_edit", args=[self.ch.pk]), None),
+            ("post", reverse("channel_sync", args=[self.ch.pk]), None),
+            ("get", reverse("users"), None),
+            ("get", reverse("user_create"), None),
+            ("get", reverse("user_edit", args=[self.admin.pk]), None),
+            ("post", reverse("invite_create"), {"name": "x", "role": "admin"}),
+        ]
+        for method, url, data in forbidden:
+            resp = getattr(self.client, method)(url, data or {})
+            self.assertEqual(resp.status_code, 403, url)
+        b = Booking.objects.create(check_in=d(1), check_out=d(2), total_price=100)
+        p = Payment.objects.create(booking=b, amount=100)
+        self.assertEqual(self.client.post(reverse("payment_delete", args=[p.pk])).status_code, 403)
+        self.assertTrue(Payment.objects.filter(pk=p.pk).exists())
+        self.assertEqual(PriceRule.objects.count(), 1)
+        self.assertEqual(Invite.objects.count(), 0)
+        nav = self.client.get(reverse("calendar"))
+        self.assertNotContains(nav, reverse("users"))
+        self.assertNotContains(nav, reverse("channels"))
+
+    def test_admin_sees_admin_sections(self):
+        self.client.force_login(self.admin)
+        nav = self.client.get(reverse("calendar"))
+        self.assertContains(nav, reverse("users"))
+        self.assertContains(nav, reverse("channels"))
+        for name in ("users", "user_create", "channels"):
+            self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+
+
+class UserManagementTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(self.admin)
+
+    def test_create_edit_block_and_reset_password(self):
+        resp = self.client.post(reverse("user_create"), {
+            "username": "irina", "first_name": "Ирина", "role": "manager",
+            "password1": "Long-pass-12345", "password2": "Long-pass-12345",
+        })
+        self.assertEqual(resp.status_code, 302)
+        u = User.objects.get(username="irina")
+        self.assertFalse(u.is_superuser)
+        self.assertTrue(u.check_password("Long-pass-12345"))
+
+        self.client.post(reverse("user_edit", args=[u.pk]), {"first_name": "Ирина П.", "role": "admin", "is_active": "on"})
+        u.refresh_from_db()
+        self.assertTrue(u.is_superuser and u.is_staff)
+        self.assertEqual(u.first_name, "Ирина П.")
+
+        self.client.post(reverse("user_edit", args=[u.pk]), {"first_name": "Ирина П.", "role": "manager"})
+        u.refresh_from_db()
+        self.assertFalse(u.is_active or u.is_superuser)  # снята галочка — заблокирован
+
+        self.client.post(reverse("user_edit", args=[u.pk]), {"set_password": "1", "new_password1": "Another-pass-777", "new_password2": "Another-pass-777"})
+        u.refresh_from_db()
+        self.assertTrue(u.check_password("Another-pass-777"))
+
+    def test_blocked_user_is_logged_out(self):
+        u = User.objects.create_user("worker", password="very-secret-pass")
+        other = self.client_class()
+        other.force_login(u)
+        self.assertEqual(other.get(reverse("calendar")).status_code, 200)
+        u.is_active = False
+        u.save()
+        self.assertEqual(other.get(reverse("calendar")).status_code, 302)
+
+    def test_admin_cannot_demote_or_block_self(self):
+        self.client.post(reverse("user_edit", args=[self.admin.pk]), {"first_name": "Я", "role": "manager"})
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_superuser and self.admin.is_active)
+        self.assertEqual(self.admin.first_name, "Я")
+
+    def test_weak_password_rejected(self):
+        resp = self.client.post(reverse("user_create"), {"username": "x", "role": "manager", "password1": "123", "password2": "123"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(User.objects.filter(username="x").exists())
+
+
+class InviteTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+
+    def accept(self, invite, username="newbie"):
+        return self.client.post(reverse("invite_accept", args=[invite.token]), {
+            "first_name": "Новенький", "username": username,
+            "password1": "Long-pass-12345", "password2": "Long-pass-12345",
+        })
+
+    def test_create_accept_and_reuse(self):
+        self.client.force_login(self.admin)
+        self.client.post(reverse("invite_create"), {"name": "Ирина, менеджер", "role": "manager"})
+        invite = Invite.objects.get()
+        self.assertEqual(invite.created_by, self.admin)
+        self.assertContains(self.client.get(reverse("users")), invite.token)
+        self.client.logout()
+
+        page = self.client.get(reverse("invite_accept", args=[invite.token]))
+        self.assertContains(page, "Вас пригласили")
+        self.assertContains(page, 'value="Ирина"')
+        resp = self.accept(invite)
+        self.assertEqual(resp.status_code, 302)
+        user = User.objects.get(username="newbie")
+        self.assertFalse(user.is_superuser)
+        invite.refresh_from_db()
+        self.assertEqual((invite.status, invite.used_by), ("used", user))
+        self.assertEqual(self.client.get(reverse("calendar")).status_code, 200)  # сразу вошёл
+
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("invite_accept", args=[invite.token])).status_code, 410)
+        self.accept(invite, username="second")
+        self.assertFalse(User.objects.filter(username="second").exists())
+
+    def test_admin_invite_expired_and_revoked(self):
+        admin_inv = Invite.objects.create(role="admin")
+        self.accept(admin_inv, "boss")
+        self.assertTrue(User.objects.get(username="boss").is_superuser)
+        self.client.logout()
+
+        expired = Invite.objects.create(expires_at=timezone.now() - timedelta(minutes=1))
+        self.assertEqual(self.client.get(reverse("invite_accept", args=[expired.token])).status_code, 410)
+        revoked = Invite.objects.create()
+        self.client.force_login(self.admin)
+        self.client.post(reverse("invite_revoke", args=[revoked.pk]))
+        self.client.logout()
+        revoked.refresh_from_db()
+        self.assertEqual(revoked.status, "revoked")
+        self.accept(revoked, "late")
+        self.assertFalse(User.objects.filter(username="late").exists())
+        self.assertEqual(self.client.get(reverse("invite_accept", args=["nope"])).status_code, 404)
+
+
+@override_settings(CACHES=LOCMEM)
+class LoginThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        User.objects.create_user("owner", password="very-secret-pass")
+
+    def test_lockout_after_failed_attempts(self):
+        for _ in range(5):
+            resp = self.client.post(reverse("login"), {"username": "owner", "password": "wrong"})
+            self.assertEqual(resp.status_code, 200)
+        resp = self.client.post(reverse("login"), {"username": "owner", "password": "very-secret-pass"})
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Слишком много", status_code=429)
+        cache.clear()
+        resp = self.client.post(reverse("login"), {"username": "owner", "password": "very-secret-pass"})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_profile_name_and_password(self):
+        self.client.post(reverse("login"), {"username": "owner", "password": "very-secret-pass"})
+        self.client.post(reverse("account"), {"first_name": "Сергей"})
+        self.assertEqual(User.objects.get(username="owner").first_name, "Сергей")
+        resp = self.client.post(reverse("account"), {"change_password": "1", "old_password": "very-secret-pass",
+                                                     "new_password1": "Brand-new-pass-1", "new_password2": "Brand-new-pass-1"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.client.get(reverse("calendar")).status_code, 200)  # сессия сохранилась
+        self.assertTrue(User.objects.get(username="owner").check_password("Brand-new-pass-1"))
