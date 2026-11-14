@@ -102,7 +102,8 @@ form.inline { display: inline; }
 .form p { margin: 0 0 12px; }
 .form label { display: block; font-weight: 600; margin-bottom: 4px; }
 .form input[type=text], .form input[type=tel], .form input[type=number], .form input[type=date],
-.form input[type=time], .form input[type=url], .form input[type=password], .form select, .form textarea {
+.form input[type=time], .form input[type=url], .form input[type=password], .form input[type=email],
+.form input[type=search], .form select, .form textarea {
   width: 100%; max-width: 420px; padding: 8px 10px; font: inherit; color: var(--text);
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
 }
@@ -291,3 +292,21 @@ h3 { font-size: 16px; margin: 20px 0 8px; }
 .invite-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
 .invite-list code.url { margin: 6px 0; }
 .topbar nav a.me { font-weight: 600; }
+
+/* ---------- гости */
+.search-input { padding: 7px 10px; min-width: 240px; flex: 1 1 240px; max-width: 420px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; }
+.filters select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; }
+.guest-picker { margin: 0 0 12px; position: relative; }
+.guest-picker .gp-label { display: block; font-weight: 600; margin-bottom: 4px; }
+.gp-selected { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); max-width: 640px; }
+.gp-selected .gp-name { font-weight: 600; }
+.gp-input { width: 100%; max-width: 420px; padding: 8px 10px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.gp-results { list-style: none; margin: 4px 0 0; padding: 4px; max-width: 520px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.gp-results button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; cursor: pointer; }
+.gp-results button:hover, .gp-results button:focus-visible { background: var(--sel); outline: none; }
+.gp-empty { padding: 8px 10px; }
+
+/* ---------- импорт */
+tr.imp-conflict td, tr.imp-error td { background: var(--warn-bg); }
+tr.imp-enrich td { background: var(--bg); }
+.form select { width: 100%; max-width: 420px; }

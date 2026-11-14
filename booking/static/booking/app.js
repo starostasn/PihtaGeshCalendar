@@ -6,6 +6,12 @@
     if (form && !window.confirm(form.dataset.confirm)) e.preventDefault();
   });
 
+  // <button data-confirm-click="Текст"> — подтверждение для конкретной кнопки формы
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-confirm-click]");
+    if (btn && !window.confirm(btn.dataset.confirmClick)) e.preventDefault();
+  });
+
   // <button data-copy="id-элемента"> — скопировать текст элемента в буфер обмена
   document.addEventListener("click", async (e) => {
     const btn = e.target.closest("button[data-copy]");

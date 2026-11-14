@@ -16,6 +16,7 @@
     {% with u=request.resolver_match.url_name %}
     <a href="{% url 'calendar' %}" class="{% if u == 'calendar' %}active{% endif %}">Календарь</a>
     <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}">Брони</a>
+    <a href="{% url 'guests' %}" class="{% if u == 'guests' or u == 'guest_edit' or u == 'guest_create' %}active{% endif %}">Гости</a>
     <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}">Цены</a>
     <a href="{% url 'stats' %}" class="{% if u == 'stats' %}active{% endif %}">Статистика</a>
     {% if is_admin %}

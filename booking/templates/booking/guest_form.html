@@ -1,0 +1,92 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}{% if guest %}{{ guest.name }}{% else %}Новый гость{% endif %}{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'guests' %}">← Гости</a></div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <h1 style="margin:0">{% if guest %}{{ guest.name }}{% else %}Новый гость{% endif %}</h1>
+    {% if guest %}<a class="btn small primary" href="{% url 'booking_create' %}?guest={{ guest.pk }}">+ Бронь для гостя</a>{% endif %}
+  </div>
+  {% if guest and not guest.phone %}<div class="msg warning" style="margin-top:12px">У гостя нет телефона — добавьте, если знаете.</div>{% endif %}
+  {% if duplicate_of %}
+    <div class="msg warning" style="margin-top:12px">Этот номер уже есть у гостя <a href="{% url 'guest_edit' duplicate_of.pk %}">«{{ duplicate_of.name }}»</a>.
+      {% if is_admin and guest %}Если это один человек — объедините карточки внизу страницы.{% endif %}</div>
+  {% endif %}
+  <form method="post" class="form" style="margin-top:12px">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="grid2">
+      <p>{{ form.name.label_tag }}{{ form.name }}{{ form.name.errors }}</p>
+      <p>{{ form.phone.label_tag }}{{ form.phone }}{{ form.phone.errors }}</p>
+      <p>{{ form.city.label_tag }}{{ form.city }}{{ form.city.errors }}</p>
+      <p>{{ form.email.label_tag }}{{ form.email }}{{ form.email.errors }}</p>
+    </div>
+    <p>{{ form.address.label_tag }}{{ form.address }}{{ form.address.errors }}</p>
+    <p>{{ form.notes.label_tag }}{{ form.notes }}{{ form.notes.errors }}</p>
+    <div class="row">
+      <button class="btn primary" type="submit">{% if guest %}Сохранить{% else %}Добавить гостя{% endif %}</button>
+      {% if guest %}<span class="muted small">Добавлен {{ guest.created_at|date:"d.m.Y" }}{% if guest.created_by %} · {{ guest.created_by.get_full_name|default:guest.created_by.username }}{% endif %}</span>{% endif %}
+    </div>
+  </form>
+</div>
+
+{% if guest %}
+<section class="card">
+  <h2 style="margin-top:0">Брони гостя</h2>
+  <div class="pay-summary">
+    <div><span class="muted small">Броней</span><b>{{ summary.count }}</b></div>
+    <div><span class="muted small">Ночей</span><b>{{ summary.nights }}</b></div>
+    <div><span class="muted small">Сумма</span><b>{{ summary.total|rub }} ₽</b></div>
+    <div><span class="muted small">Должен</span><b class="{% if summary.debt %}due-text{% endif %}">{{ summary.debt|rub }} ₽</b></div>
+  </div>
+  {% if bookings %}
+  <div class="scroll-x">
+  <table class="list">
+    <tr><th>Даты</th><th>Статус</th><th>Источник</th><th class="num">Сумма</th><th class="num">Остаток</th><th>Комментарий</th></tr>
+    {% for b in bookings %}
+    <tr{% if b.is_cancelled %} class="muted"{% endif %}>
+      <td><a href="{% url 'booking_edit' b.pk %}">{{ b.check_in|date:"d.m.Y" }} – {{ b.check_out|date:"d.m.Y" }}</a><br><span class="muted small">{{ b.nights }} н.{% if b.guests %} · {{ b.guests }} гост.{% endif %}</span></td>
+      <td><span class="status status-{{ b.status }}">{{ b.get_status_display }}</span></td>
+      <td style="white-space:nowrap"><span class="dot" style="--c: {{ b.color }}"></span> {{ b.source_name }}</td>
+      <td class="num">{{ b.total_price|rub }}</td>
+      <td class="num">{% if b.balance_due is not None and not b.is_cancelled %}{% if b.balance_due > 0 %}<span class="due-text">{{ b.balance_due|rub }}</span>{% elif b.balance_due < 0 %}<span class="warn-text">−{{ b.balance_due|abs_int|rub }}</span>{% else %}<span class="ok-text">0</span>{% endif %}{% endif %}</td>
+      <td class="small">{{ b.comment|truncatechars:80 }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}<p class="muted">Броней пока нет.</p>{% endif %}
+</section>
+
+{% if is_admin %}
+<section class="card">
+  <h2 style="margin-top:0">Объединить с другим гостем</h2>
+  <p class="muted small">Если этот человек есть в справочнике дважды: выберите вторую карточку — её брони перейдут сюда,
+    пустые поля этой карточки заполнятся из второй, а вторая карточка удалится.</p>
+  <form method="post" action="{% url 'guest_merge' guest.pk %}" class="form" data-confirm="Объединить карточки? Вторая карточка будет удалена, её брони перейдут сюда.">
+    {% csrf_token %}
+    <div class="guest-picker" id="mergePicker" data-search-url="{% url 'guest_search' %}" data-exclude="{{ guest.pk }}">
+      <input type="hidden" name="other" value="">
+      <div class="gp-selected" hidden>
+        <a class="gp-name" href="#"></a> <span class="gp-phone muted"></span>
+        <button class="btn small" type="button" data-gp-clear>Другой</button>
+        <button class="btn small primary" type="submit">Объединить</button>
+      </div>
+      <div class="gp-search">
+        <input type="search" class="gp-input" placeholder="Найти вторую карточку: имя или телефон" autocomplete="off" aria-label="Найти гостя для объединения">
+        <ul class="gp-results" hidden></ul>
+      </div>
+    </div>
+  </form>
+  {% if not bookings %}
+  <form method="post" action="{% url 'guest_delete' guest.pk %}" style="margin-top:16px" data-confirm="Удалить гостя из справочника?">
+    {% csrf_token %}<button class="btn small danger" type="submit">Удалить гостя</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'booking/guest_picker.js' %}"></script>{% endblock %}

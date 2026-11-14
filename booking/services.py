@@ -15,7 +15,7 @@ class OverlapError(Exception):
 
 
 def find_overlaps(check_in: date, check_out: date, exclude_pk: int | None = None) -> list[Booking]:
-    qs = Booking.objects.active().overlapping(check_in, check_out).select_related("channel")
+    qs = Booking.objects.active().overlapping(check_in, check_out).select_related("channel", "guest")
     if exclude_pk:
         qs = qs.exclude(pk=exclude_pk)
     return list(qs)
@@ -49,7 +49,7 @@ def conflict_pairs(horizon_days: int = 730) -> list[tuple[Booking, Booking]]:
     bookings = list(
         Booking.objects.active()
         .filter(check_out__gt=today, check_in__lt=today + timedelta(days=horizon_days))
-        .select_related("channel")
+        .select_related("channel", "guest")
         .order_by("check_in", "pk")
     )
     pairs = []

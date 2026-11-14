@@ -149,7 +149,7 @@ class Core:
 
 def _load(start: date, end: date):
     qs = (
-        Booking.objects.select_related("channel")
+        Booking.objects.select_related("channel", "guest")
         .prefetch_related("payments")
         .filter(Q(check_in__lt=end, check_out__gt=start) | Q(check_in__gte=start, check_in__lt=end))
     )

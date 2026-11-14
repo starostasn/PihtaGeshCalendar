@@ -9,6 +9,7 @@
   <a class="btn small{% if show == 'debts' %} primary{% endif %}" href="?show=debts">Долги</a>
   <a class="btn small{% if show == 'past' %} primary{% endif %}" href="?show=past">Прошедшие</a>
   <a class="btn small{% if show == 'cancelled' %} primary{% endif %}" href="?show=cancelled">Отменённые</a>
+  {% if is_admin %}<a class="btn small" href="{% url 'import' %}">Загрузить старые брони</a>{% endif %}
 </div>
 <div class="card scroll-x">
   {% if bookings %}
@@ -17,7 +18,7 @@
     {% for b in bookings %}
     <tr>
       <td><a href="{% url 'booking_edit' b.pk %}">{{ b.check_in|date:"d.m.Y" }} – {{ b.check_out|date:"d.m.Y" }}</a><br><span class="muted small">{{ b.nights }} н.</span></td>
-      <td>{{ b.title }}{% if b.phone %}<br><a class="small" href="tel:{{ b.phone }}">{{ b.phone }}</a>{% endif %}</td>
+      <td>{% if b.guest %}<a href="{% url 'guest_edit' b.guest.pk %}">{{ b.guest.name }}</a>{% if b.guest.phone %}<br><a class="small" href="tel:{{ b.guest.phone }}">{{ b.guest.phone_display }}</a>{% endif %}{% else %}{{ b.title }}{% endif %}</td>
       <td><span class="status status-{{ b.status }}">{% if b.kind == 'block' %}{% if b.is_cancelled %}Открыто{% else %}Закрыто{% endif %}{% else %}{{ b.get_status_display }}{% endif %}</span></td>
       <td><span class="dot" style="--c: {{ b.color }}"></span> {{ b.source_name }}</td>
       <td>{{ b.total_price|rub }}</td>

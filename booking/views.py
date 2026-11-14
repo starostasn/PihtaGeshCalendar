@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,7 +16,8 @@ from django.views.decorators.http import require_POST
 
 from .forms import BookingForm, ChannelForm, HouseForm, PaymentForm, PeriodPriceForm, PriceRuleForm
 from .ical import build_export, sync_channel
-from .models import Booking, Channel, House, Payment, PriceRule, SyncLog
+from .guests import guest_choice_payload
+from .models import Booking, Channel, Guest, House, Payment, PriceRule, SyncLog
 from .permissions import admin_required, forbidden, is_admin
 from .pricing import PriceCalculator
 from .services import OverlapError, conflict_pairs, is_possible_echo, save_booking
@@ -117,7 +119,10 @@ def calendar_view(request):
     ly, lm = _add_months(y, m, months_count)
     last = date(ly, lm, 1) + timedelta(days=7)
     bookings = list(
-        Booking.objects.active().overlapping(first, last).select_related("channel").order_by("check_in", "pk")
+        Booking.objects.active()
+        .overlapping(first, last)
+        .select_related("channel", "guest")
+        .order_by("check_in", "pk")
     )
     calc = PriceCalculator()
     months = [_build_month(*_add_months(y, m, i), bookings, calc, today) for i in range(months_count)]
@@ -125,7 +130,7 @@ def calendar_view(request):
     upcoming = (
         Booking.objects.active()
         .filter(check_out__gte=today)
-        .select_related("channel")
+        .select_related("channel", "guest")
         .prefetch_related("payments")
         .order_by("check_in")[:20]
     )
@@ -162,7 +167,12 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
             if is_new:
                 obj.created_by = request.user
             try:
-                save_booking(obj)
+                with transaction.atomic():
+                    if form.new_guest is not None:
+                        form.new_guest.created_by = request.user
+                        form.new_guest.save()
+                        obj.guest = form.new_guest
+                    save_booking(obj)
             except OverlapError as exc:
                 for c in exc.conflicts:
                     form.add_error(
@@ -173,6 +183,10 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
             else:
                 if is_new:
                     form.save_initial_payment(obj, request.user)
+                if form.matched_guest is not None:
+                    messages.info(request, f"Телефон уже был в справочнике — бронь привязана к гостю «{form.matched_guest.name}»")
+                elif form.new_guest is not None:
+                    messages.info(request, f"Гость «{form.new_guest.name}» добавлен в справочник")
                 if obj.kind == Booking.Kind.BLOCK:
                     text = "Даты открыты" if obj.is_cancelled else "Даты закрыты"
                 else:
@@ -191,8 +205,15 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
                 initial["total_price"] = PriceCalculator(house).quote(check_in, check_out).total
             if request.GET.get("kind") == Booking.Kind.BLOCK:
                 initial["kind"] = Booking.Kind.BLOCK
+            guest_id = request.GET.get("guest", "")
+            if guest_id.isdigit() and Guest.objects.filter(pk=int(guest_id)).exists():
+                initial["guest"] = int(guest_id)
         form = BookingForm(instance=booking, initial=initial)
 
+    selected_guest = None
+    guest_value = form["guest"].value()
+    if guest_value and str(guest_value).isdigit():
+        selected_guest = Guest.objects.filter(pk=int(guest_value)).first()
     if booking is not None and payment_form is None:
         balance = booking.balance_due
         payment_form = PaymentForm(initial={"amount": balance if balance and balance > 0 else None})
@@ -206,6 +227,7 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
             "house": house,
             "payment_form": payment_form,
             "payments": list(booking.payments.all()) if booking else [],
+            "selected_guest": guest_choice_payload(selected_guest),
         },
     )
 
@@ -217,7 +239,7 @@ def booking_create(request):
 
 @login_required
 def booking_edit(request, pk: int):
-    return _booking_form_view(request, get_object_or_404(Booking.objects.select_related("channel"), pk=pk))
+    return _booking_form_view(request, get_object_or_404(Booking.objects.select_related("channel", "guest"), pk=pk))
 
 
 @login_required
@@ -272,7 +294,7 @@ def quote_api(request):
 def booking_list(request):
     show = request.GET.get("show", "upcoming")
     today = timezone.localdate()
-    qs = Booking.objects.select_related("channel").prefetch_related("payments")
+    qs = Booking.objects.select_related("channel", "guest").prefetch_related("payments")
     if show == "requests":
         qs = qs.filter(status=Booking.Status.REQUEST, check_out__gte=today).order_by("check_in")
     elif show == "debts":

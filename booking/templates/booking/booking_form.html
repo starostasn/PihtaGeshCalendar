@@ -52,9 +52,26 @@
       <p>{{ form.check_out.label_tag }}{{ form.check_out }}{{ form.check_out.errors }}</p>
     </div>
     <div class="quote" id="quote" hidden></div>
+    <div class="guest-picker booking-only" id="guestPicker" data-search-url="{% url 'guest_search' %}">
+      {{ form.guest }}
+      <label class="gp-label">Гость</label>
+      {{ form.guest.errors }}
+      <div class="gp-selected"{% if not selected_guest %} hidden{% endif %}>
+        <a class="gp-name" href="{{ selected_guest.url|default:'#' }}">{{ selected_guest.name }}</a>
+        <span class="gp-phone muted">{% if selected_guest.phone %}{{ selected_guest.phone }}{% else %}<span class="badge warn">нет телефона</span>{% endif %}</span>
+        <button class="btn small" type="button" data-gp-clear>Другой гость</button>
+      </div>
+      <div class="gp-search"{% if selected_guest %} hidden{% endif %}>
+        <input type="search" class="gp-input" placeholder="Найти в справочнике: имя или телефон" autocomplete="off" aria-label="Найти гостя">
+        <ul class="gp-results" hidden></ul>
+        <p class="muted small" style="margin:8px 0 4px">Нет в справочнике? Укажите имя и телефон — гость добавится сам.</p>
+        <div class="grid2">
+          <p>{{ form.new_guest_name.label_tag }}{{ form.new_guest_name }}{{ form.new_guest_name.errors }}</p>
+          <p>{{ form.new_guest_phone.label_tag }}{{ form.new_guest_phone }}{{ form.new_guest_phone.errors }}</p>
+        </div>
+      </div>
+    </div>
     <div class="grid2 booking-only">
-      <p>{{ form.guest_name.label_tag }}{{ form.guest_name }}{{ form.guest_name.errors }}</p>
-      <p>{{ form.phone.label_tag }}{{ form.phone }}{{ form.phone.errors }}</p>
       <p>{{ form.guests.label_tag }}{{ form.guests }}{{ form.guests.errors }}<span class="helptext">Максимум {{ house.max_guests }}</span></p>
       <p>{{ form.channel.label_tag }}{{ form.channel }}{{ form.channel.errors }}</p>
       <p>{{ form.total_price.label_tag }}{{ form.total_price }}{{ form.total_price.errors }}</p>
@@ -136,4 +153,5 @@
 </section>
 {% endif %}
 {% endblock %}
-{% block scripts %}<script src="{% static 'booking/booking_form.js' %}"></script>{% endblock %}
+{% block scripts %}<script src="{% static 'booking/booking_form.js' %}"></script>
+<script src="{% static 'booking/guest_picker.js' %}"></script>{% endblock %}

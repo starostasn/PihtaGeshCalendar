@@ -146,6 +146,92 @@ class Channel(models.Model):
         return self.name
 
 
+class ImportBatch(models.Model):
+    """Загрузка старых броней из файла: черновик -> применена -> (отменена)."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        APPLIED = "applied", "Загружено"
+        REVERTED = "reverted", "Отменено"
+
+    filename = models.CharField("Файл", max_length=255)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    rows = models.JSONField("Строки файла", default=list)
+    options = models.JSONField("Настройки", default=dict)
+    result = models.JSONField("Итог", default=dict)
+    enriched = models.JSONField("Дополненные брони", default=list)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    reverted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Импорт броней"
+        verbose_name_plural = "Импорт броней"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.filename} ({self.created_at:%d.%m.%Y %H:%M})"
+
+
+class Guest(models.Model):
+    """Справочник гостей: один гость — много броней."""
+
+    name = models.CharField("Имя", max_length=200)
+    phone = models.CharField(
+        "Телефон", max_length=20, blank=True, help_text="Хранится в виде +79123456789; один номер — один гость"
+    )
+    city = models.CharField("Откуда", max_length=120, blank=True, help_text="Город или регион")
+    address = models.CharField("Адрес", max_length=300, blank=True)
+    email = models.EmailField("E-mail", blank=True)
+    notes = models.TextField("Заметки", blank=True)
+    import_batch = models.ForeignKey(
+        ImportBatch, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="guests"
+    )
+    # Имя, город и e-mail в нижнем регистре для поиска: LIKE в SQLite не различает регистр только у латиницы
+    search_text = models.CharField(max_length=700, blank=True, editable=False)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Гость"
+        verbose_name_plural = "Гости"
+        ordering = ["name", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["phone"], condition=~Q(phone=""), name="guest_unique_phone"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.phone_display})" if self.phone else self.name
+
+    @staticmethod
+    def search_key(text: str) -> str:
+        return " ".join((text or "").lower().replace("ё", "е").split())
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join(self.name.split())
+        self.search_text = self.search_key(f"{self.name} {self.city} {self.email}")
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"search_text"}
+        super().save(*args, **kwargs)
+
+    @property
+    def phone_display(self) -> str:
+        from .phones import format_phone
+
+        return format_phone(self.phone)
+
+    @property
+    def has_phone(self) -> bool:
+        return bool(self.phone)
+
+
 class BookingQuerySet(models.QuerySet):
     def active(self):
         """Брони и заявки — всё, что занимает даты в календаре (кроме отменённых)."""
@@ -190,8 +276,9 @@ class Booking(models.Model):
         related_name="bookings",
         help_text="Пусто — прямая бронь (телефон, мессенджер, постоянный гость).",
     )
-    guest_name = models.CharField("Гость", max_length=200, blank=True)
-    phone = models.CharField("Телефон", max_length=50, blank=True)
+    guest = models.ForeignKey(
+        Guest, verbose_name="Гость", null=True, blank=True, on_delete=models.PROTECT, related_name="bookings"
+    )
     guests = models.PositiveSmallIntegerField("Гостей", null=True, blank=True)
     total_price = models.PositiveIntegerField("Сумма, ₽", null=True, blank=True)
     comment = models.TextField("Комментарий", blank=True)
@@ -200,6 +287,9 @@ class Booking(models.Model):
     external_uid = models.CharField(max_length=500, blank=True)
     external_summary = models.CharField("Описание с площадки", max_length=500, blank=True)
     cancel_reason = models.CharField("Причина отмены", max_length=300, blank=True)
+    import_batch = models.ForeignKey(
+        ImportBatch, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="bookings"
+    )
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -229,7 +319,7 @@ class Booking(models.Model):
         ]
 
     def __str__(self):
-        who = self.guest_name or self.get_kind_display()
+        who = self.guest.name if self.guest_id else self.get_kind_display()
         return f"{who}: {self.check_in:%d.%m}–{self.check_out:%d.%m.%Y}"
 
     @property
@@ -308,7 +398,9 @@ class Booking(models.Model):
     def title(self) -> str:
         if self.kind == self.Kind.BLOCK:
             return self.comment.splitlines()[0][:40] if self.comment else "Закрыто"
-        return self.guest_name or self.external_summary or "Бронь"
+        if self.guest_id:
+            return self.guest.name
+        return self.external_summary or "Бронь"
 
 
 class SyncLog(models.Model):
@@ -345,6 +437,9 @@ class Payment(models.Model):
     amount = models.PositiveIntegerField("Сумма, ₽", validators=[MinValueValidator(1)])
     method = models.CharField("Способ", max_length=10, choices=Method.choices, default=Method.TRANSFER)
     comment = models.CharField("Комментарий", max_length=300, blank=True)
+    import_batch = models.ForeignKey(
+        ImportBatch, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="payments"
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="Внёс",

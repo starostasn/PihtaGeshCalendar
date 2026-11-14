@@ -2,7 +2,8 @@ from django import forms
 
 from django.utils import timezone
 
-from .models import WEEKDAY_NAMES, Booking, Channel, House, Payment, PriceRule
+from .models import WEEKDAY_NAMES, Booking, Channel, Guest, House, Payment, PriceRule
+from .phones import normalize_phone
 
 
 class DateInput(forms.DateInput):
@@ -13,6 +14,11 @@ class DateInput(forms.DateInput):
 
 
 class BookingForm(forms.ModelForm):
+    # Гость выбирается из справочника (скрытое поле guest) или создаётся по имени и телефону
+    new_guest_name = forms.CharField(label="Имя гостя", max_length=200, required=False)
+    new_guest_phone = forms.CharField(
+        label="Телефон гостя", max_length=40, required=False, widget=forms.TextInput(attrs={"type": "tel"})
+    )
     # Только при создании брони: сразу записать первый платёж (предоплату)
     initial_payment = forms.IntegerField(label="Предоплата, ₽", min_value=0, required=False)
     initial_payment_method = forms.ChoiceField(
@@ -26,8 +32,7 @@ class BookingForm(forms.ModelForm):
             "status",
             "check_in",
             "check_out",
-            "guest_name",
-            "phone",
+            "guest",
             "guests",
             "channel",
             "total_price",
@@ -39,11 +44,14 @@ class BookingForm(forms.ModelForm):
             "comment": forms.Textarea(attrs={"rows": 3}),
             "kind": forms.RadioSelect(),
             "status": forms.RadioSelect(),
-            "phone": forms.TextInput(attrs={"type": "tel"}),
+            "guest": forms.HiddenInput(),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.new_guest = None  # будет создан при сохранении брони
+        self.matched_guest = None  # найден в справочнике по телефону
+        self.fields["guest"].queryset = Guest.objects.all()
         self.fields["channel"].empty_label = "Напрямую"
         self.fields["channel"].queryset = Channel.objects.all()
         if self.instance.pk:
@@ -59,9 +67,36 @@ class BookingForm(forms.ModelForm):
         check_in, check_out = data.get("check_in"), data.get("check_out")
         if check_in and check_out and check_out <= check_in:
             self.add_error("check_out", "Дата выезда должна быть позже даты заезда.")
+        self._clean_guest(data)
         if data.get("kind") == Booking.Kind.BLOCK and data.get("status") == Booking.Status.REQUEST:
             self.add_error("status", "Закрытые даты не могут быть заявкой — выберите «Бронь» или «Отмена».")
         return data
+
+    def _clean_guest(self, data):
+        if data.get("kind") == Booking.Kind.BLOCK:
+            data["guest"] = None
+            return
+        if data.get("guest"):
+            return
+        name = " ".join((data.get("new_guest_name") or "").split())
+        raw_phone = (data.get("new_guest_phone") or "").strip()
+        if not name and not raw_phone:
+            return  # бронь без гостя (например, быстро закрыть даты с Авито)
+        phone = normalize_phone(raw_phone)
+        if raw_phone and not phone:
+            self.add_error("new_guest_phone", "Не похоже на номер телефона.")
+            return
+        if not phone:
+            self.add_error("new_guest_phone", "Укажите телефон гостя.")
+            return
+        existing = Guest.objects.filter(phone=phone).first()
+        if existing:
+            data["guest"] = self.matched_guest = existing
+            return
+        if not name:
+            self.add_error("new_guest_name", "Укажите имя гостя.")
+            return
+        self.new_guest = Guest(name=name, phone=phone)
 
     def save_initial_payment(self, booking: Booking, user=None) -> Payment | None:
         amount = self.cleaned_data.get("initial_payment")
@@ -247,3 +282,37 @@ class ProfileForm(forms.ModelForm):
         model = User
         fields = ("first_name",)
         labels = {"first_name": "Имя"}
+
+
+
+# ---------------------------------------------------------------- гости
+
+
+class GuestForm(forms.ModelForm):
+    phone = forms.CharField(label="Телефон", max_length=40, required=False, widget=forms.TextInput(attrs={"type": "tel"}))
+
+    class Meta:
+        model = Guest
+        fields = ("name", "phone", "city", "address", "email", "notes")
+        widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Телефон обязателен у новых гостей; у старых без телефона (например, из импорта) можно оставить пустым
+        self.require_phone = self.instance.pk is None or bool(self.instance.phone)
+        if self.instance.pk and self.instance.phone:
+            self.initial["phone"] = self.instance.phone_display
+
+    def clean_phone(self):
+        raw = self.cleaned_data.get("phone", "").strip()
+        phone = normalize_phone(raw)
+        if raw and not phone:
+            raise forms.ValidationError("Не похоже на номер телефона. Пример: +7 912 345-67-89")
+        if not phone and self.require_phone:
+            raise forms.ValidationError("Укажите телефон гостя.")
+        if phone:
+            other = Guest.objects.filter(phone=phone).exclude(pk=self.instance.pk).first()
+            if other:
+                self.duplicate_of = other
+                raise forms.ValidationError(f"Этот номер уже есть у гостя «{other.name}».")
+        return phone

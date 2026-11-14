@@ -12,6 +12,13 @@ from .pricing import PriceCalculator
 from .services import OverlapError, conflict_pairs, save_booking
 
 
+def G(name: str, phone: str = ""):
+    """Гость для тестов (по имени; один и тот же для одинакового имени)."""
+    from .models import Guest
+
+    return Guest.objects.get_or_create(name=name, defaults={"phone": phone})[0]
+
+
 def d(offset: int) -> date:
     return timezone.localdate() + timedelta(days=offset)
 
@@ -94,11 +101,11 @@ class PricingTests(TestCase):
 
 class OverlapTests(TestCase):
     def test_adjacent_allowed_overlap_rejected(self):
-        save_booking(Booking(check_in=d(10), check_out=d(13), guest_name="A"))
-        save_booking(Booking(check_in=d(13), check_out=d(15), guest_name="B"))  # заезд в день выезда
-        save_booking(Booking(check_in=d(8), check_out=d(10), guest_name="C"))
+        save_booking(Booking(check_in=d(10), check_out=d(13), guest=G("A")))
+        save_booking(Booking(check_in=d(13), check_out=d(15), guest=G("B")))  # заезд в день выезда
+        save_booking(Booking(check_in=d(8), check_out=d(10), guest=G("C")))
         with self.assertRaises(OverlapError):
-            save_booking(Booking(check_in=d(12), check_out=d(14), guest_name="D"))
+            save_booking(Booking(check_in=d(12), check_out=d(14), guest=G("D")))
         with self.assertRaises(OverlapError):
             save_booking(Booking(kind=Booking.Kind.BLOCK, check_in=d(9), check_out=d(16)))
 
@@ -115,7 +122,7 @@ class ExportTests(TestCase):
     def test_export_excludes_own_imported_bookings_and_hides_guest(self):
         avito = Channel.objects.create(name="Авито")
         sutochno = Channel.objects.create(name="Суточно")
-        Booking.objects.create(check_in=d(1), check_out=d(3), guest_name="Иван Петров", phone="+7900")
+        Booking.objects.create(check_in=d(1), check_out=d(3), guest=G("Иван Петров", "+79001234567"))
         Booking.objects.create(check_in=d(5), check_out=d(7), channel=avito, external_uid="av-1")
         Booking.objects.create(check_in=d(9), check_out=d(10), channel=avito)  # вручную, источник Авито
         Booking.objects.create(check_in=d(20), check_out=d(22), status=Booking.Status.CANCELLED)
@@ -127,7 +134,7 @@ class ExportTests(TestCase):
         self.assertEqual(len(for_sutochno), 3)
         raw = build_export(sutochno).decode()
         self.assertNotIn("Иван", raw)
-        self.assertNotIn("+7900", raw)
+        self.assertNotIn("79001234567", raw)
         self.assertIn(f"DTEND;VALUE=DATE:{d(3):%Y%m%d}", raw)
 
 
@@ -212,7 +219,7 @@ class SyncChannelTests(TestCase):
         return True
 
     def test_new_booking_and_conflict_notification(self):
-        save_booking(Booking(check_in=d(10), check_out=d(12), guest_name="Прямой"))
+        save_booking(Booking(check_in=d(10), check_out=d(12), guest=G("Прямой")))
         data = ics(vevent("x", d(11), d(13)))
         r = sync_channel(self.ch, fetch=lambda url: data, notify=self.notify)
         self.assertTrue(r.ok)
@@ -266,7 +273,7 @@ class ViewTests(TestCase):
     def test_pages_render(self):
         self.client.force_login(self.user)
         ch = Channel.objects.create(name="Авито")
-        Booking.objects.create(check_in=d(1), check_out=d(4), guest_name="Анна")
+        Booking.objects.create(check_in=d(1), check_out=d(4), guest=G("Анна"))
         Booking.objects.create(check_in=d(6), check_out=d(8), channel=ch, external_uid="u1")
         PriceRule.objects.create(name="Выходные", weekdays="4,5", price=15000)
         for name in ("calendar", "booking_list", "prices", "channels", "booking_create", "channel_create", "rule_create"):
@@ -283,7 +290,8 @@ class ViewTests(TestCase):
             "kind": "booking",
             "check_in": d(10).isoformat(),
             "check_out": d(12).isoformat(),
-            "guest_name": "Мария",
+            "new_guest_name": "Мария",
+            "new_guest_phone": "8 900 111-22-33",
             "status": "confirmed",
             "total_price": 20000,
         }
@@ -303,11 +311,11 @@ class ViewTests(TestCase):
         b = Booking.objects.create(check_in=d(6), check_out=d(8), channel=ch, external_uid="u1")
         resp = self.client.post(
             reverse("booking_edit", args=[b.pk]),
-            {"check_in": d(1).isoformat(), "check_out": d(20).isoformat(), "guest_name": "Олег", "status": "cancelled"},
+            {"check_in": d(1).isoformat(), "check_out": d(20).isoformat(), "new_guest_name": "Олег", "new_guest_phone": "+7 900 555-44-33", "status": "cancelled"},
         )
         self.assertEqual(resp.status_code, 302)
         b.refresh_from_db()
-        self.assertEqual((b.check_in, b.check_out, b.guest_name, b.channel), (d(6), d(8), "Олег", ch))
+        self.assertEqual((b.check_in, b.check_out, b.guest.name, b.channel), (d(6), d(8), "Олег", ch))
         self.assertEqual(b.status, Booking.Status.CONFIRMED)  # статус импортированной брони задаёт площадка
 
     def test_quote_api(self):
@@ -368,8 +376,8 @@ from .stats import build_dashboard, resolve_period  # noqa: E402
 class StatusTests(TestCase):
     def test_request_blocks_overlap_but_is_not_exported(self):
         ch = Channel.objects.create(name="Авито")
-        save_booking(Booking(check_in=d(10), check_out=d(12), status=Booking.Status.REQUEST, guest_name="Заявка"))
-        save_booking(Booking(check_in=d(20), check_out=d(22), guest_name="Бронь"))
+        save_booking(Booking(check_in=d(10), check_out=d(12), status=Booking.Status.REQUEST, guest=G("Заявка")))
+        save_booking(Booking(check_in=d(20), check_out=d(22), guest=G("Бронь")))
         with self.assertRaises(OverlapError):
             save_booking(Booking(check_in=d(11), check_out=d(13)))
         exported = parse_feed(build_export(ch))
@@ -455,7 +463,7 @@ class PaymentTests(TestCase):
         self.assertEqual(b.payments.count(), 1)
 
     def test_lists_render_with_payments(self):
-        b = Booking.objects.create(check_in=d(1), check_out=d(3), total_price=20000, guest_name="Должник")
+        b = Booking.objects.create(check_in=d(1), check_out=d(3), total_price=20000, guest=G("Должник"))
         Payment.objects.create(booking=b, amount=1000)
         for show in ("upcoming", "requests", "debts", "past", "cancelled"):
             self.assertEqual(self.client.get(reverse("booking_list"), {"show": show}).status_code, 200, show)
@@ -508,7 +516,7 @@ class StatsTests(TestCase):
 
     def test_stats_page_renders_for_all_presets(self):
         self.client.force_login(User.objects.create_user("owner", password="very-secret-pass"))
-        b = Booking.objects.create(check_in=d(-3), check_out=d(2), total_price=50000, guest_name="Гость")
+        b = Booking.objects.create(check_in=d(-3), check_out=d(2), total_price=50000, guest=G("Гость"))
         Payment.objects.create(booking=b, amount=10000)
         for preset in ("this_month", "last_month", "next_90", "last_12", "this_year", "last_year", "garbage"):
             resp = self.client.get(reverse("stats"), {"period": preset})
@@ -760,3 +768,244 @@ class SecurityHeadersTests(TestCase):
 
     def test_django_admin_disabled_by_default(self):
         self.assertEqual(self.client.get("/admin/").status_code, 404)
+
+
+# ---------------------------------------------------------------- гости
+
+from .models import Guest  # noqa: E402
+from .phones import format_phone, normalize_phone  # noqa: E402
+
+
+class PhoneTests(TestCase):
+    def test_normalize_and_format(self):
+        for raw in ("8 (912) 345-67-89", "+7 912 345 67 89", "79123456789", "9123456789", " +7(912)3456789 "):
+            self.assertEqual(normalize_phone(raw), "+79123456789", raw)
+        self.assertEqual(normalize_phone("+375 29 123-45-67"), "+375291234567")
+        self.assertEqual(normalize_phone("12345"), "")
+        self.assertEqual(normalize_phone(""), "")
+        self.assertEqual(format_phone("+79123456789"), "+7 912 345-67-89")
+
+
+class GuestTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.manager = User.objects.create_user("manager", password="very-secret-pass")
+        self.client.force_login(self.manager)
+
+    def post_booking(self, a, b, **extra):
+        data = {"kind": "booking", "status": "confirmed", "check_in": d(a).isoformat(), "check_out": d(b).isoformat(), "total_price": 10000}
+        data.update(extra)
+        return self.client.post(reverse("booking_create"), data)
+
+    def test_booking_creates_guest_and_reuses_by_phone(self):
+        self.post_booking(10, 12, new_guest_name="Анна Смирнова", new_guest_phone="8 (912) 345-67-89")
+        g = Guest.objects.get()
+        self.assertEqual((g.name, g.phone, g.created_by), ("Анна Смирнова", "+79123456789", self.manager))
+        # тот же номер в другом написании — та же гостья, даже если имя написано иначе
+        self.post_booking(20, 22, new_guest_name="Аня", new_guest_phone="+7 912 3456789")
+        self.assertEqual(Guest.objects.count(), 1)
+        self.assertEqual(g.bookings.count(), 2)
+        # выбор из справочника
+        self.post_booking(30, 32, guest=g.pk)
+        self.assertEqual(g.bookings.count(), 3)
+
+    def test_guest_validation_and_no_orphans(self):
+        resp = self.post_booking(10, 12, new_guest_name="Без телефона")
+        self.assertContains(resp, "Укажите телефон")
+        resp = self.post_booking(10, 12, new_guest_phone="+7 900 000-00-01")
+        self.assertContains(resp, "Укажите имя")
+        resp = self.post_booking(10, 12, new_guest_name="Кривой", new_guest_phone="123")
+        self.assertContains(resp, "Не похоже на номер")
+        self.assertEqual(Guest.objects.count(), 0)
+        save_booking(Booking(check_in=d(10), check_out=d(12)))
+        resp = self.post_booking(11, 13, new_guest_name="Олег", new_guest_phone="+7 900 000-00-02")
+        self.assertContains(resp, "Даты пересекаются")
+        self.assertEqual(Guest.objects.count(), 0)  # бронь не сохранилась — гость не создан
+        self.post_booking(20, 21)  # бронь без гостя допустима
+        self.assertTrue(Booking.objects.filter(check_in=d(20), guest=None).exists())
+
+    def test_list_search_and_card(self):
+        g1 = Guest.objects.create(name="Анна Смирнова", phone="+79123456789", city="Казань")
+        Guest.objects.create(name="Пётр Иванов", phone="+79990001122")
+        Guest.objects.create(name="Без Телефона")
+        Booking.objects.create(check_in=d(-10), check_out=d(-7), guest=g1, total_price=30000)
+        Booking.objects.create(check_in=d(5), check_out=d(7), guest=g1, total_price=20000)
+        Booking.objects.create(check_in=d(15), check_out=d(17), guest=g1, total_price=999, status=Booking.Status.CANCELLED)
+        for q, expected in (("анна", 1), ("АННА смир", 1), ("912 345", 1), ("8912", 1), ("казань", 1), ("", 3), ("нет такого", 0)):
+            resp = self.client.get(reverse("guests"), {"q": q})
+            self.assertEqual(len(resp.context["page"].object_list), expected, q)
+        resp = self.client.get(reverse("guests"), {"sort": "total"})
+        self.assertEqual(resp.context["page"].object_list[0], g1)
+        self.assertEqual(resp.context["page"].object_list[0].total, 50000)  # отмена не считается
+        self.assertContains(self.client.get(reverse("guests")), "нет телефона")
+        card = self.client.get(reverse("guest_edit", args=[g1.pk]))
+        self.assertEqual(card.context["summary"]["count"], 2)
+        self.assertEqual(card.context["summary"]["total"], 50000)
+        api = self.client.get(reverse("guest_search"), {"q": "смирн"}).json()["results"]
+        self.assertEqual([r["name"] for r in api], ["Анна Смирнова"])
+        self.assertEqual(api[0]["phone"], "+7 912 345-67-89")
+
+    def test_create_edit_and_duplicate_phone(self):
+        self.client.post(reverse("guest_create"), {"name": "Ирина", "phone": "8 900 123-45-67"})
+        g = Guest.objects.get(name="Ирина")
+        self.assertEqual(g.phone, "+79001234567")
+        resp = self.client.post(reverse("guest_create"), {"name": "Двойник", "phone": "+7 900 1234567"})
+        self.assertContains(resp, "уже есть у гостя")
+        resp = self.client.post(reverse("guest_create"), {"name": "Без номера"})
+        self.assertContains(resp, "Укажите телефон")
+        legacy = Guest.objects.create(name="Старый гость")  # из импорта, без телефона
+        resp = self.client.post(reverse("guest_edit", args=[legacy.pk]), {"name": "Старый гость", "city": "Пермь"})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_merge_and_delete_admin_only(self):
+        keep = Guest.objects.create(name="Анна", city="")
+        dup = Guest.objects.create(name="Анна С.", phone="+79123456789", city="Казань", notes="любит тишину")
+        Booking.objects.create(check_in=d(1), check_out=d(2), guest=dup)
+        self.assertEqual(self.client.post(reverse("guest_merge", args=[keep.pk]), {"other": dup.pk}).status_code, 403)
+        self.client.force_login(self.admin)
+        self.client.post(reverse("guest_merge", args=[keep.pk]), {"other": dup.pk})
+        keep.refresh_from_db()
+        self.assertFalse(Guest.objects.filter(pk=dup.pk).exists())
+        self.assertEqual((keep.phone, keep.city, keep.notes), ("+79123456789", "Казань", "любит тишину"))
+        self.assertEqual(keep.bookings.count(), 1)
+        self.client.post(reverse("guest_delete", args=[keep.pk]))
+        self.assertTrue(Guest.objects.filter(pk=keep.pk).exists())  # есть брони — не удаляется
+        empty = Guest.objects.create(name="Пустой")
+        self.client.post(reverse("guest_delete", args=[empty.pk]))
+        self.assertFalse(Guest.objects.filter(pk=empty.pk).exists())
+
+
+# ---------------------------------------------------------------- загрузка старых броней
+
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+
+from .importer import ImportFileError, parse_contacts, parse_file, parse_guests_count  # noqa: E402
+from .models import ImportBatch  # noqa: E402
+
+
+def rc_xls(rows, header=("Объект", "Заезд", "Выезд", "Контакты", "Примечания", "Гостей", "Сумма", "Источник", "Менеджер")) -> bytes:
+    """Файл в формате выгрузки RealtyCalendar (Excel XML 2003) с выдуманными данными."""
+    def row(cells):
+        out = []
+        for c in cells:
+            kind = "Number" if isinstance(c, float) else "String"
+            out.append(f'<Cell><Data ss:Type="{kind}">{c}</Data></Cell>')
+        return "<Row>" + "".join(out) + "</Row>"
+    body = row(header) + "".join(row(r) for r in rows)
+    return (
+        '<?xml version="1.0"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+        'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Sheet1"><Table>'
+        + body + "</Table></Worksheet></Workbook>"
+    ).encode()
+
+
+def fmt(x):
+    return x.strftime("%d.%m.%Y")
+
+
+class ImportParsingTests(TestCase):
+    def test_contacts_and_guests(self):
+        self.assertEqual(parse_contacts("Анна Смирнова +7 912 345-67-89"), ("Анна Смирнова", "+79123456789"))
+        self.assertEqual(parse_contacts("Пётр И. А., 01.02.1980 8 (900) 111-22-33"), ("Пётр И. А.", "+79001112233"))
+        self.assertEqual(parse_contacts("Только Имя "), ("Только Имя", ""))
+        self.assertEqual(parse_contacts(""), ("", ""))
+        self.assertEqual(parse_guests_count("", "4 гостей."), 4)
+        self.assertEqual(parse_guests_count("", "Гостей: 3"), 3)
+        self.assertEqual(parse_guests_count("", "2 взрослых и ребенок"), 3)
+        self.assertEqual(parse_guests_count("", "3 человека + 2 реб"), 5)
+        self.assertEqual(parse_guests_count("5", "что угодно"), 5)
+        self.assertIsNone(parse_guests_count("", "жили у соседа"))
+
+    def test_bad_files(self):
+        with self.assertRaises(ImportFileError):
+            parse_file(b"PK\x03\x04 not xml")
+        with self.assertRaises(ImportFileError):
+            parse_file(rc_xls([("x",)], header=("Объект", "Контакты")))
+        with self.assertRaises(ImportFileError):
+            parse_file(b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><Workbook/>')
+        rows = parse_file(rc_xls([("Дом", "31.02.2025", "03.03.2025", "", "", "", 1.0, "", ""),
+                                  ("Дом", "05.03.2025", "04.03.2025", "", "", "", 1.0, "", "")]))
+        self.assertEqual([r["error"] for r in rows], ["не распознаны даты", "выезд не позже заезда"])
+
+
+class ImportFlowTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(self.admin)
+        self.avito = Channel.objects.create(name="Авито")
+        self.file = rc_xls([
+            ("Дом", fmt(d(-100)), fmt(d(-97)), "Анна Смирнова +7 912 345-67-89", "4 гостей.", "", 30000.0, "manual", "s@x.ru"),
+            ("Дом", fmt(d(-50)), fmt(d(-48)), "Анна С. 8 912 3456789", "Гостей: 2", "", 20000.0, "avito.ru", "s@x.ru"),
+            ("Дом", fmt(d(-30)), fmt(d(-28)), "Без Телефона", "", "", 15000.0, "YandexTravel", "p@x.ru"),
+            ("Дом", fmt(d(-20)), fmt(d(-19)), "", "", "", 0.0, "widget", ""),
+            ("Дом", fmt(d(10)), fmt(d(14)), "Пётр +7 900 000-00-07", "", "", 40000.0, "Avito", "a@x.ru"),
+            ("Дом", fmt(d(30)), fmt(d(33)), "Конфликт +7 900 000-00-08", "", "", 1.0, "manual", ""),
+        ])
+        # бронь с Авито по iCal на даты строки 5 (без гостя) и ручная бронь, пересекающая строку 6
+        self.ical = Booking.objects.create(check_in=d(10), check_out=d(14), channel=self.avito, external_uid="u1")
+        Booking.objects.create(check_in=d(31), check_out=d(35), guest=G("Живой гость"))
+
+    def upload(self):
+        resp = self.client.post(reverse("import"), {"file": SimpleUploadedFile("bookings.xls", self.file)})
+        self.assertEqual(resp.status_code, 302)
+        return ImportBatch.objects.latest("pk")
+
+    def test_preview_apply_revert(self):
+        batch = self.upload()
+        page = self.client.get(reverse("import_preview", args=[batch.pk]))
+        s = page.context["summary"]
+        self.assertEqual((s["create"], s["enrich"], s["conflict"], s["new_guests"], s["no_phone"], s["blocks"]), (4, 1, 1, 3, 1, 1))
+        self.assertEqual(Booking.objects.count(), 2)  # предпросмотр ничего не создаёт
+
+        mapping = {src["index"]: src for src in page.context["sources"]}
+        post = {"action": "apply", "mark_paid": "on", "zero_as_block": "on"}
+        for i, src in mapping.items():
+            post[f"source_{i}"] = src["value"]
+        self.client.post(reverse("import_preview", args=[batch.pk]), post)
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, "applied")
+        self.assertEqual(batch.result["created"], 4)
+
+        anna = Guest.objects.get(phone="+79123456789")
+        self.assertEqual(anna.bookings.count(), 2)  # одна гостья по телефону в разных написаниях
+        nophone = Guest.objects.get(name="Без Телефона")
+        self.assertEqual(nophone.phone, "")
+        first = Booking.objects.get(check_in=d(-100))
+        self.assertEqual((first.guests, first.total_price, first.channel), (4, 30000, None))
+        self.assertIn("менеджер: s@x.ru", first.comment)
+        self.assertEqual(first.payments.get().amount, 30000)  # прошлая бронь оплачена
+        self.assertEqual(Booking.objects.get(check_in=d(-50)).channel, self.avito)
+        self.assertEqual(Booking.objects.get(check_in=d(-30)).channel.name, "Яндекс Путешествия")
+        blocked = Booking.objects.get(check_in=d(-20))  # без гостя и с нулём — закрытые даты
+        self.assertEqual((blocked.kind, blocked.guest, blocked.payments.count()), ("block", None, 0))
+        self.ical.refresh_from_db()
+        self.assertEqual((self.ical.guest.name, self.ical.total_price, self.ical.payments.count()), ("Пётр", 40000, 0))
+        self.assertFalse(Booking.objects.filter(check_in=d(30)).exists())  # конфликт пропущен
+
+        self.client.post(reverse("import_revert", args=[batch.pk]))
+        batch.refresh_from_db()
+        self.ical.refresh_from_db()
+        self.assertEqual(batch.status, "reverted")
+        self.assertEqual(Booking.objects.count(), 2)
+        self.assertIsNone(self.ical.guest)
+        self.assertIsNone(self.ical.total_price)
+        self.assertFalse(Guest.objects.filter(import_batch=batch).exists())
+        self.assertFalse(Channel.objects.filter(name="Яндекс Путешествия").exists())
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_reupload_is_idempotent(self):
+        from .importer import apply_batch
+
+        b1 = self.upload()
+        apply_batch(b1, self.admin)
+        counts = (Booking.objects.count(), Guest.objects.count(), Payment.objects.count())
+        b2 = self.upload()
+        s = self.client.get(reverse("import_preview", args=[b2.pk])).context["summary"]
+        self.assertEqual((s["create"], s["enrich"], s["same"]), (0, 0, 5))
+        apply_batch(b2, self.admin)
+        self.assertEqual((Booking.objects.count(), Guest.objects.count(), Payment.objects.count()), counts)
+
+    def test_manager_cannot_import(self):
+        self.client.force_login(User.objects.create_user("m", password="very-secret-pass"))
+        self.assertEqual(self.client.get(reverse("import")).status_code, 403)
+        self.assertEqual(self.client.post(reverse("import"), {"file": SimpleUploadedFile("b.xls", self.file)}).status_code, 403)

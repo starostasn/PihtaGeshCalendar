@@ -4,16 +4,25 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import redirect_to_login
 from django.urls import path, reverse
 
-from booking import accounts, views
+from booking import accounts, guests, import_views, views
 
 urlpatterns = [
     path("", views.calendar_view, name="calendar"),
     path("bookings/", views.booking_list, name="booking_list"),
     path("bookings/new/", views.booking_create, name="booking_create"),
     path("bookings/<int:pk>/", views.booking_edit, name="booking_edit"),
+    path("bookings/import/", import_views.import_view, name="import"),
+    path("bookings/import/<int:pk>/", import_views.import_preview, name="import_preview"),
+    path("bookings/import/<int:pk>/revert/", import_views.import_revert, name="import_revert"),
     path("bookings/<int:pk>/payments/", views.payment_add, name="payment_add"),
     path("payments/<int:pk>/delete/", views.payment_delete, name="payment_delete"),
     path("api/quote/", views.quote_api, name="quote_api"),
+    path("api/guests/", guests.guest_search_api, name="guest_search"),
+    path("guests/", guests.guests_view, name="guests"),
+    path("guests/new/", guests.guest_create, name="guest_create"),
+    path("guests/<int:pk>/", guests.guest_edit, name="guest_edit"),
+    path("guests/<int:pk>/delete/", guests.guest_delete, name="guest_delete"),
+    path("guests/<int:pk>/merge/", guests.guest_merge, name="guest_merge"),
     path("prices/", views.prices_view, name="prices"),
     path("prices/rules/new/", views.rule_edit, name="rule_create"),
     path("prices/rules/<int:pk>/", views.rule_edit, name="rule_edit"),

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Booking, Channel, House, Payment, PriceRule, SyncLog
+from .models import Booking, Channel, Guest, House, Payment, PriceRule, SyncLog
 
 
 class PaymentInline(admin.TabularInline):
@@ -10,11 +10,18 @@ class PaymentInline(admin.TabularInline):
 
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ("check_in", "check_out", "kind", "status", "channel", "guest_name", "total_price")
+    list_display = ("check_in", "check_out", "kind", "status", "channel", "guest", "total_price")
     inlines = [PaymentInline]
     list_filter = ("status", "kind", "channel")
-    search_fields = ("guest_name", "phone", "comment", "external_summary")
+    search_fields = ("guest__name", "guest__phone", "comment", "external_summary")
+    raw_id_fields = ("guest",)
     date_hierarchy = "check_in"
+
+
+@admin.register(Guest)
+class GuestAdmin(admin.ModelAdmin):
+    list_display = ("name", "phone", "city", "email", "created_at")
+    search_fields = ("name", "phone", "email")
 
 
 @admin.register(PriceRule)

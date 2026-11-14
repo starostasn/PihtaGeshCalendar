@@ -1,0 +1,33 @@
+{% extends "booking/base.html" %}
+{% block title %}Загрузка старых броней{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'booking_list' %}">← Брони</a></div>
+<div class="card">
+  <h1>Загрузка старых броней</h1>
+  <p class="muted">Загрузите выгрузку броней из RealtyCalendar (файл <b>.xls</b>, как он скачался, без изменений).
+    Сначала вы увидите предпросмотр — ничего не создаётся, пока вы не нажмёте «Загрузить». Загрузку можно отменить.</p>
+  <form method="post" enctype="multipart/form-data" class="form">
+    {% csrf_token %}
+    <p><input type="file" name="file" accept=".xls,.xml" required></p>
+    <button class="btn primary" type="submit">Показать предпросмотр</button>
+  </form>
+</div>
+
+{% if batches %}
+<section class="card scroll-x">
+  <h2 style="margin-top:0">История загрузок</h2>
+  <table class="list small">
+    <tr><th>Когда</th><th>Файл</th><th>Кто</th><th>Итог</th><th>Статус</th></tr>
+    {% for b in batches %}
+    <tr>
+      <td><a href="{% url 'import_preview' b.pk %}">{{ b.applied_at|default:b.created_at|date:"d.m.Y H:i" }}</a></td>
+      <td>{{ b.filename }}</td>
+      <td>{{ b.created_by.get_full_name|default:b.created_by.username }}</td>
+      <td>создано {{ b.result.created }}, дополнено {{ b.result.enriched }}, гостей {{ b.result.guests }}</td>
+      <td>{% if b.status == 'reverted' %}<span class="badge">Отменено</span>{% else %}<span class="badge ok">Загружено</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+{% endblock %}

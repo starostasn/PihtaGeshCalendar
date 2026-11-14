@@ -1,0 +1,47 @@
+{% extends "booking/base.html" %}
+{% load booking_extras %}
+{% block title %}Гости{% endblock %}
+{% block content %}
+<div class="cal-head">
+  <h1>Гости</h1>
+  <span class="muted small">{{ total_count }} в справочнике{% if no_phone_count %} · без телефона: {{ no_phone_count }}{% endif %}</span>
+  <a class="btn small primary" href="{% url 'guest_create' %}">+ Гость</a>
+</div>
+
+<form method="get" class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="Имя, телефон, город или e-mail" class="search-input" aria-label="Поиск гостей">
+  <select name="sort" aria-label="Сортировка">
+    {% for key, label in sorts %}<option value="{{ key }}"{% if key == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button class="btn small" type="submit">Найти</button>
+  {% if q %}<a class="btn small" href="{% url 'guests' %}">Сбросить</a>{% endif %}
+</form>
+
+<section class="card scroll-x">
+  {% if page.object_list %}
+  <table class="list">
+    <tr><th>Имя</th><th>Телефон</th><th>Откуда</th><th class="num">Броней</th><th class="num">Сумма</th><th>Последний заезд</th><th>Ближайший</th></tr>
+    {% for g in page.object_list %}
+    <tr>
+      <td><a href="{% url 'guest_edit' g.pk %}"><b>{{ g.name }}</b></a></td>
+      <td>{% if g.phone %}<a href="tel:{{ g.phone }}">{{ g.phone_display }}</a>{% else %}<span class="badge warn">нет телефона</span>{% endif %}</td>
+      <td class="small">{{ g.city }}</td>
+      <td class="num">{{ g.bookings_count }}</td>
+      <td class="num">{% if g.total %}{{ g.total|rub }} ₽{% else %}—{% endif %}</td>
+      <td class="small">{{ g.last_stay|date:"d.m.Y"|default:"—" }}</td>
+      <td class="small">{% if g.next_stay %}<b>{{ g.next_stay|date:"d.m.Y" }}</b>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if page.has_other_pages %}
+  <div class="row" style="margin-top:12px">
+    {% if page.has_previous %}<a class="btn small" href="?q={{ q|urlencode }}&sort={{ sort }}&page={{ page.previous_page_number }}">← Назад</a>{% endif %}
+    <span class="muted small">Страница {{ page.number }} из {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="btn small" href="?q={{ q|urlencode }}&sort={{ sort }}&page={{ page.next_page_number }}">Дальше →</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="muted">{% if q %}Никого не нашли по запросу «{{ q }}».{% else %}Гостей пока нет — они появятся, когда вы создадите бронь с гостем или загрузите старые брони.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}
