@@ -1050,7 +1050,7 @@ class HouseInfoTests(TestCase):
         house.save()
         mod.fill(apps, None)
         house.refresh_from_db()
-        self.assertEqual((house.name, house.max_guests, house.area_m2, house.prepayment_percent), ("Пихта", 8, 80, 30))
+        self.assertEqual((house.name, house.max_guests, house.area_m2, house.prepayment_percent), ("ПихтаГеш", 8, 80, 30))
         self.assertEqual(house.check_in_time.strftime("%H:%M"), "15:00")
         self.assertIn("Славянская", house.address)
         self.assertEqual(house.rules, "Свои правила")  # заполненное вручную не трогаем
@@ -1081,7 +1081,7 @@ class HouseInfoTests(TestCase):
                                  "location_info", "rules", "cancellation_policy", "extra_services",
                                  "checkin_instructions", "wifi_name", "wifi_password", "lockbox_code",
                                  "team_contacts", "admin_notes", "area_m2", "plot_sotok", "rooms", "deposit")}
-        data.update(name="Пихта", max_guests=8, check_in_time="15:00", check_out_time="12:00", prepayment_percent=30,
+        data.update(name="ПихтаГеш", max_guests=8, check_in_time="15:00", check_out_time="12:00", prepayment_percent=30,
                     lockbox_code="4321")
         resp = self.client.post(reverse("house_edit"), data)
         self.assertEqual(resp.status_code, 302)
@@ -1153,3 +1153,15 @@ class HousePhotoTests(TestCase):
         page = self.client.get(reverse("house"))
         self.assertContains(page, "Гостиная")
         self.assertContains(page, 'id="photo-list"')
+
+
+class HouseNameMigrationTests(TestCase):
+    def test_auto_names_become_pihtagesh_manual_kept(self):
+        mod = importlib.import_module("booking.migrations.0009_house_name_pihtagesh")
+        from django.apps import apps
+
+        for old, expected in (("Пихта", "ПихтаГеш"), ("Пихта Гэш", "ПихтаГеш"), ("Гостевой дом", "ПихтаГеш"), ("Мой дом", "Мой дом")):
+            House.objects.all().delete()
+            House.objects.create(name=old)
+            mod.rename(apps, None)
+            self.assertEqual(House.get().name, expected, old)
