@@ -23,6 +23,8 @@ def fill(apps, schema_editor):
     if not DATA.exists():
         return
     data = json.loads(DATA.read_text(encoding="utf-8"))
+    if not House.objects.exists():
+        House.objects.create()  # запись о доме создаётся при первом открытии цен — может ещё не быть
     for house in House.objects.all():
         for field in TEXT_FIELDS:
             if not getattr(house, field) and data.get(field):
