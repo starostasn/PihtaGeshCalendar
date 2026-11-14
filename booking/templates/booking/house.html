@@ -1,0 +1,151 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}О доме{% endblock %}
+{% block content %}
+<section class="house-hero card">
+  {% if cover %}
+  <button type="button" class="house-cover" data-lightbox-index="{{ cover.pk }}" aria-label="Открыть главное фото">
+    <img src="{% url 'photo_file' cover.pk 'full' %}" alt="{{ cover.caption|default:house.name }}" width="{{ cover.width }}" height="{{ cover.height }}">
+  </button>
+  {% endif %}
+  <div class="house-head">
+    <div>
+      <h1>{{ house.name }}</h1>
+      {% if house.tagline %}<p class="muted" style="margin:0">{{ house.tagline }}</p>{% endif %}
+    </div>
+    <div class="row">
+      {% if house.avito_url %}<a class="btn small" href="{{ house.avito_url }}" target="_blank" rel="noopener noreferrer">Объявление на Авито ↗</a>{% endif %}
+      {% if house.map_url %}<a class="btn small" href="{{ house.map_url }}" target="_blank" rel="noopener noreferrer">На карте ↗</a>{% endif %}
+      {% if is_admin %}<a class="btn small primary" href="{% url 'house_edit' %}">Редактировать</a>{% endif %}
+    </div>
+  </div>
+  <ul class="facts">
+    {% if house.area_m2 %}<li><b>{{ house.area_m2 }} м²</b><span>дом</span></li>{% endif %}
+    {% if house.rooms %}<li><b>{{ house.rooms }}</b><span>{{ house.rooms|ru_plural:"комната,комнаты,комнат" }}</span></li>{% endif %}
+    {% if house.floors %}<li><b>{{ house.floors }}</b><span>этажность</span></li>{% endif %}
+    {% if house.plot_sotok %}<li><b>{{ house.plot_sotok }} сот.</b><span>участок</span></li>{% endif %}
+    <li><b>до {{ house.max_guests }}</b><span>{{ house.max_guests|ru_plural:"гостя,гостей,гостей" }}</span></li>
+    <li><b>{{ house.check_in_time|time:"H:i" }} / {{ house.check_out_time|time:"H:i" }}</b><span>заезд / выезд</span></li>
+    {% if house.deposit %}<li><b>{{ house.deposit|rub }} ₽</b><span>залог</span></li>{% endif %}
+    {% if house.prepayment_percent %}<li><b>{{ house.prepayment_percent }}%</b><span>предоплата</span></li>{% endif %}
+  </ul>
+</section>
+
+{% if photos %}
+<section class="card" id="photos">
+  <h2 style="margin-top:0">Фотографии <span class="muted small">{{ photos|length }}</span></h2>
+  <div class="gallery">
+    {% for p in photos %}
+    <button type="button" class="gallery-item" data-lightbox-index="{{ p.pk }}" aria-label="Открыть фото{% if p.caption %}: {{ p.caption }}{% endif %}">
+      <img src="{% url 'photo_file' p.pk 'thumb' %}" alt="{{ p.caption }}" loading="lazy">
+      {% if p.caption %}<span class="gallery-caption">{{ p.caption }}</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div class="house-grid">
+  {% if house.description %}
+  <section class="card"><h2>Описание</h2>
+    {% for para in house.description.splitlines %}{% if para.strip %}<p>{{ para }}</p>{% endif %}{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if s.layout %}
+  <section class="card"><h2>Планировка и спальные места</h2>
+    <ul class="clean">{% for x in s.layout %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  {% if s.amenities %}
+  <section class="card"><h2>Удобства</h2>
+    <ul class="amenities">{% for x in s.amenities %}<li><span aria-hidden="true">{{ x|amenity_icon }}</span>{{ x }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  {% if house.address or s.location %}
+  <section class="card"><h2>Расположение</h2>
+    {% if house.address %}<p><b>{{ house.address }}</b>{% if house.map_url %} · <a href="{{ house.map_url }}" target="_blank" rel="noopener noreferrer">Яндекс Карты ↗</a>{% endif %}</p>{% endif %}
+    <ul class="clean">{% for x in s.location %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  {% if s.rules %}
+  <section class="card"><h2>Правила проживания</h2>
+    <ul class="clean">{% for x in s.rules %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  {% if house.cancellation_policy %}
+  <section class="card"><h2>Оплата и отмена</h2>
+    {% for para in house.cancellation_policy.splitlines %}{% if para.strip %}<p>{{ para }}</p>{% endif %}{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if s.services %}
+  <section class="card"><h2>Дополнительные услуги</h2>
+    <ul class="clean">{% for x in s.services %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  <section class="card team-card"><h2>Для команды</h2>
+    {% if house.wifi_name or house.wifi_password %}
+    <p>Wi-Fi: <b id="wifiName">{{ house.wifi_name|default:"—" }}</b> · пароль <code id="wifiPass">{{ house.wifi_password|default:"—" }}</code>
+      {% if house.wifi_password %}<button class="btn small" type="button" data-copy="wifiPass">Копировать</button>{% endif %}</p>
+    {% endif %}
+    {% if house.lockbox_code %}<p>Код сейфа с ключами: <code id="lockbox">{{ house.lockbox_code }}</code> <button class="btn small" type="button" data-copy="lockbox">Копировать</button></p>{% endif %}
+    {% if house.checkin_instructions %}<h3>Как заселить гостя</h3>{% for para in house.checkin_instructions.splitlines %}{% if para.strip %}<p>{{ para }}</p>{% endif %}{% endfor %}{% endif %}
+    {% if s.team_contacts %}<h3>Контакты</h3><ul class="clean">{% for x in s.team_contacts %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if not house.wifi_password and not house.lockbox_code and not house.checkin_instructions and not s.team_contacts %}
+      <p class="muted">Здесь будут пароль Wi-Fi, код сейфа, инструкция по заселению и контакты уборки и мастеров.{% if is_admin %} <a href="{% url 'house_edit' %}">Заполнить</a>{% endif %}</p>
+    {% endif %}
+  </section>
+
+  {% if is_admin and house.admin_notes %}
+  <section class="card"><h2>Заметки администратора</h2>
+    {% for para in house.admin_notes.splitlines %}{% if para.strip %}<p>{{ para }}</p>{% endif %}{% endfor %}
+  </section>
+  {% endif %}
+</div>
+
+{% if is_admin %}
+<section class="card" id="manage-photos">
+  <h2 style="margin-top:0">Управление фото</h2>
+  <form method="post" action="{% url 'photo_upload' %}" enctype="multipart/form-data" class="row">
+    {% csrf_token %}
+    <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple required>
+    <button class="btn primary" type="submit">Загрузить</button>
+    <span class="muted small">JPEG, PNG или WebP, до 15 МБ каждое, всего до {{ max_photos }} фото. Геометки и другие метаданные удаляются.</span>
+  </form>
+  {% if photos %}
+  <ul class="photo-admin">
+    {% for p in photos %}
+    <li>
+      <img src="{% url 'photo_file' p.pk 'thumb' %}" alt="">
+      <form method="post" action="{% url 'photo_update' p.pk %}" class="row">
+        {% csrf_token %}
+        <input type="text" name="caption" value="{{ p.caption }}" placeholder="Подпись (например: Гостиная)" maxlength="200" aria-label="Подпись к фото">
+        <button class="btn small" name="action" value="caption" type="submit">Сохранить</button>
+        <button class="btn small" name="action" value="up" type="submit" aria-label="Выше"{% if forloop.first %} disabled{% endif %}>↑</button>
+        <button class="btn small" name="action" value="down" type="submit" aria-label="Ниже"{% if forloop.last %} disabled{% endif %}>↓</button>
+        {% if p.is_cover %}<span class="badge ok">главное</span>{% else %}<button class="btn small" name="action" value="cover" type="submit">Сделать главным</button>{% endif %}
+        <button class="btn small danger" name="action" value="delete" type="submit" data-confirm-click="Удалить это фото?">Удалить</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endif %}
+
+<dialog class="lightbox" id="lightbox" aria-label="Просмотр фото">
+  <img alt="">
+  <p class="lightbox-caption"></p>
+  <button type="button" class="lb-prev" aria-label="Предыдущее фото">‹</button>
+  <button type="button" class="lb-next" aria-label="Следующее фото">›</button>
+  <button type="button" class="lb-close" aria-label="Закрыть">×</button>
+</dialog>
+{{ photo_list|json_script:"photo-list" }}
+{% endblock %}
+{% block scripts %}<script src="{% static 'booking/house.js' %}"></script>{% endblock %}

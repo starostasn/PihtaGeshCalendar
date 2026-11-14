@@ -1,0 +1,52 @@
+{% extends "booking/base.html" %}
+{% block title %}О доме — редактирование{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'house' %}">← О доме</a></div>
+<form method="post" class="form">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <section class="card">
+    <h1>О доме</h1>
+    <p class="muted small">В многострочных полях пишите по одному пункту на строку — на странице они станут списком.</p>
+    <div class="grid2">
+      <p>{{ form.name.label_tag }}{{ form.name }}{{ form.name.errors }}</p>
+      <p>{{ form.tagline.label_tag }}{{ form.tagline }}{{ form.tagline.errors }}</p>
+    </div>
+    <p>{{ form.description.label_tag }}{{ form.description }}{{ form.description.errors }}</p>
+    <div class="grid2">
+      <p>{{ form.address.label_tag }}{{ form.address }}{{ form.address.errors }}</p>
+      <p>{{ form.avito_url.label_tag }}{{ form.avito_url }}{{ form.avito_url.errors }}</p>
+    </div>
+  </section>
+  <section class="card">
+    <h2 style="margin-top:0">Параметры</h2>
+    <div class="grid2">
+      {% for f in form %}{% if f.name in "area_m2 plot_sotok floors rooms max_guests check_in_time check_out_time deposit prepayment_percent" %}
+      <p>{{ f.label_tag }}{{ f }}{{ f.errors }}</p>
+      {% endif %}{% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <h2 style="margin-top:0">Для гостей</h2>
+    {% for f in form %}{% if f.name in "layout amenities location_info rules cancellation_policy extra_services" %}
+    <p>{{ f.label_tag }}{{ f }}{% if f.help_text %}<span class="helptext">{{ f.help_text }}</span>{% endif %}{{ f.errors }}</p>
+    {% endif %}{% endfor %}
+  </section>
+  <section class="card">
+    <h2 style="margin-top:0">Для команды</h2>
+    <p class="muted small">Видно всем сотрудникам календаря — менеджерам это нужно отправлять гостям.</p>
+    <div class="grid2">
+      <p>{{ form.wifi_name.label_tag }}{{ form.wifi_name }}</p>
+      <p>{{ form.wifi_password.label_tag }}{{ form.wifi_password }}</p>
+      <p>{{ form.lockbox_code.label_tag }}{{ form.lockbox_code }}</p>
+    </div>
+    <p>{{ form.checkin_instructions.label_tag }}{{ form.checkin_instructions }}<span class="helptext">{{ form.checkin_instructions.help_text }}</span></p>
+    <p>{{ form.team_contacts.label_tag }}{{ form.team_contacts }}<span class="helptext">{{ form.team_contacts.help_text }}</span></p>
+  </section>
+  <section class="card">
+    <h2 style="margin-top:0">Только для администратора</h2>
+    <p>{{ form.admin_notes.label_tag }}{{ form.admin_notes }}</p>
+    <button class="btn primary" type="submit">Сохранить</button>
+  </section>
+</form>
+{% endblock %}

@@ -1009,3 +1009,147 @@ class ImportFlowTests(TestCase):
         self.client.force_login(User.objects.create_user("m", password="very-secret-pass"))
         self.assertEqual(self.client.get(reverse("import")).status_code, 403)
         self.assertEqual(self.client.post(reverse("import"), {"file": SimpleUploadedFile("b.xls", self.file)}).status_code, 403)
+
+
+# ---------------------------------------------------------------- о доме и фото
+
+import importlib  # noqa: E402
+import io  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from PIL import Image  # noqa: E402
+
+from .models import HousePhoto  # noqa: E402
+
+
+def make_jpeg(w=3000, h=2000, orientation=None, gps=True) -> bytes:
+    img = Image.new("RGB", (w, h), (40, 90, 60))
+    exif = Image.Exif()
+    exif[0x010F] = "TestCam"  # Make
+    if orientation:
+        exif[0x0112] = orientation
+    if gps:
+        exif[0x8825] = {1: "N", 2: (53.0, 0.0, 0.0), 3: "E", 4: (87.0, 0.0, 0.0)}  # GPSInfo
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", exif=exif)
+    return buf.getvalue()
+
+
+class HouseInfoTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.manager = User.objects.create_user("manager", password="very-secret-pass")
+
+    def test_listing_migration_fills_only_empty_fields(self):
+        mod = importlib.import_module("booking.migrations.0007_fill_house_from_listing")
+        from django.apps import apps
+
+        house = House.get()
+        house.rules = "Свои правила"
+        house.save()
+        mod.fill(apps, None)
+        house.refresh_from_db()
+        self.assertEqual((house.name, house.max_guests, house.area_m2, house.prepayment_percent), ("Пихта", 8, 80, 30))
+        self.assertEqual(house.check_in_time.strftime("%H:%M"), "15:00")
+        self.assertIn("Славянская", house.address)
+        self.assertEqual(house.rules, "Свои правила")  # заполненное вручную не трогаем
+        house.name = "Моё название"
+        house.save()
+        mod.fill(apps, None)
+        house.refresh_from_db()
+        self.assertEqual(house.name, "Моё название")
+
+    def test_page_for_team_and_edit_for_admin(self):
+        house = House.get()
+        house.amenities = "Wi-Fi\nСушилка для ботинок"
+        house.wifi_password = "pihta-2026"
+        house.admin_notes = "секрет админа"
+        house.address = "пгт. Шерегеш, Славянская ул., 53"
+        house.save()
+        self.client.force_login(self.manager)
+        page = self.client.get(reverse("house"))
+        self.assertContains(page, "Сушилка для ботинок")
+        self.assertContains(page, "pihta-2026")  # команде виден пароль Wi-Fi
+        self.assertNotContains(page, "секрет админа")
+        self.assertContains(page, "yandex.ru/maps/?text=")
+        self.assertNotContains(page, reverse("house_edit"))
+        self.assertEqual(self.client.get(reverse("house_edit")).status_code, 403)
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get(reverse("house")), "секрет админа")
+        data = {f: "" for f in ("tagline", "description", "address", "avito_url", "floors", "layout", "amenities",
+                                 "location_info", "rules", "cancellation_policy", "extra_services",
+                                 "checkin_instructions", "wifi_name", "wifi_password", "lockbox_code",
+                                 "team_contacts", "admin_notes", "area_m2", "plot_sotok", "rooms", "deposit")}
+        data.update(name="Пихта", max_guests=8, check_in_time="15:00", check_out_time="12:00", prepayment_percent=30,
+                    lockbox_code="4321")
+        resp = self.client.post(reverse("house_edit"), data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(House.get().lockbox_code, "4321")
+
+    def test_booking_form_shows_prepayment_percent(self):
+        house = House.get()
+        house.prepayment_percent = 30
+        house.save()
+        self.client.force_login(self.manager)
+        self.assertContains(self.client.get(reverse("booking_create")), 'data-prepay="30"')
+
+
+class HousePhotoTests(TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        override = self.settings(DATA_DIR=Path(self.tmp.name))
+        override.enable()
+        self.addCleanup(override.disable)
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(self.admin)
+
+    def upload(self, *files):
+        return self.client.post(reverse("photo_upload"), {"photos": list(files)})
+
+    def test_upload_strips_metadata_resizes_and_rotates(self):
+        self.upload(SimpleUploadedFile("IMG_0001.jpg", make_jpeg(3000, 2000, orientation=6), "image/jpeg"))
+        photo = HousePhoto.objects.get()
+        self.assertTrue(photo.is_cover)  # первое фото становится главным
+        full = Path(self.tmp.name) / "media" / photo.image
+        with Image.open(full) as img:
+            self.assertEqual(max(img.size), 2000)
+            self.assertEqual(img.size, (1333, 2000))  # ориентация 6 — повёрнуто
+            exif = img.getexif()
+            self.assertNotIn(0x8825, exif)  # геометки нет
+            self.assertNotIn(0x010F, exif)  # и других метаданных
+        self.assertTrue((Path(self.tmp.name) / "media" / photo.thumb).is_file())
+
+    def test_rejects_non_images_and_requires_login(self):
+        resp = self.upload(SimpleUploadedFile("virus.jpg", b"not an image at all", "image/jpeg"))
+        self.assertEqual(HousePhoto.objects.count(), 0)
+        self.assertContains(self.client.get(reverse("house")), "не фотография")
+        self.upload(SimpleUploadedFile("a.jpg", make_jpeg(800, 600), "image/jpeg"))
+        photo = HousePhoto.objects.get()
+        url = reverse("photo_file", args=[photo.pk, "thumb"])
+        self.assertEqual(self.client.get(url)["Content-Type"], "image/jpeg")
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)  # без входа фото не отдаются
+        manager = User.objects.create_user("m", password="very-secret-pass")
+        self.client.force_login(manager)
+        self.assertEqual(self.client.get(url).status_code, 200)  # команде видно
+        self.assertEqual(self.upload(SimpleUploadedFile("b.jpg", make_jpeg(800, 600), "image/jpeg")).status_code, 403)
+        self.assertEqual(self.client.post(reverse("photo_update", args=[photo.pk]), {"action": "delete"}).status_code, 403)
+
+    def test_order_cover_caption_delete(self):
+        self.upload(*[SimpleUploadedFile(f"{i}.jpg", make_jpeg(800, 600, gps=False), "image/jpeg") for i in range(3)])
+        a, b, c = HousePhoto.objects.all()
+        self.client.post(reverse("photo_update", args=[c.pk]), {"action": "up"})
+        self.assertEqual([p.pk for p in HousePhoto.objects.all()], [a.pk, c.pk, b.pk])
+        self.client.post(reverse("photo_update", args=[b.pk]), {"action": "cover"})
+        self.assertEqual(HousePhoto.objects.get(is_cover=True).pk, b.pk)
+        self.client.post(reverse("photo_update", args=[a.pk]), {"action": "caption", "caption": "Гостиная"})
+        self.assertEqual(HousePhoto.objects.get(pk=a.pk).caption, "Гостиная")
+        files = [Path(self.tmp.name) / "media" / b.image, Path(self.tmp.name) / "media" / b.thumb]
+        self.client.post(reverse("photo_update", args=[b.pk]), {"action": "delete"})
+        self.assertFalse(any(f.exists() for f in files))
+        self.assertEqual(HousePhoto.objects.filter(is_cover=True).count(), 1)  # главным стало другое
+        page = self.client.get(reverse("house"))
+        self.assertContains(page, "Гостиная")
+        self.assertContains(page, 'id="photo-list"')

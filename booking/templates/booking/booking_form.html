@@ -23,7 +23,7 @@
 
   <form method="post" class="form" id="bookingForm" style="margin-top:12px"
         action="{% if booking %}{% url 'booking_edit' booking.pk %}{% endif %}"
-        data-quote-url="{% url 'quote_api' %}"{% if booking %} data-exclude="{{ booking.pk }}"{% endif %}>
+        data-quote-url="{% url 'quote_api' %}" data-prepay="{{ house.prepayment_percent|default:'' }}"{% if booking %} data-exclude="{{ booking.pk }}"{% endif %}>
     {% csrf_token %}
     {{ form.non_field_errors }}
     <div class="grid2">

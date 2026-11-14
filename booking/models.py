@@ -23,12 +23,47 @@ class House(models.Model):
     check_out_time = models.TimeField("Время выезда", default=time(12, 0))
     max_guests = models.PositiveSmallIntegerField("Максимум гостей", default=10)
 
+    # ---- «О доме»: справочник для команды. Поля «по строке на пункт» показываются списками.
+    tagline = models.CharField("Коротко о доме", max_length=200, blank=True)
+    description = models.TextField("Описание", blank=True)
+    address = models.CharField("Адрес", max_length=300, blank=True)
+    area_m2 = models.PositiveSmallIntegerField("Площадь дома, м²", null=True, blank=True)
+    plot_sotok = models.PositiveSmallIntegerField("Участок, соток", null=True, blank=True)
+    floors = models.CharField("Этажность", max_length=100, blank=True)
+    rooms = models.PositiveSmallIntegerField("Комнат", null=True, blank=True)
+    layout = models.TextField("Планировка и спальные места", blank=True, help_text="По строке на пункт")
+    amenities = models.TextField("Удобства", blank=True, help_text="По строке на пункт")
+    location_info = models.TextField("Расположение", blank=True, help_text="По строке на пункт")
+    rules = models.TextField("Правила проживания", blank=True, help_text="По строке на пункт")
+    deposit = models.PositiveIntegerField("Залог, ₽", null=True, blank=True)
+    prepayment_percent = models.PositiveSmallIntegerField("Предоплата, %", null=True, blank=True)
+    cancellation_policy = models.TextField("Оплата и отмена", blank=True)
+    extra_services = models.TextField("Дополнительные услуги", blank=True, help_text="По строке на пункт")
+    avito_url = models.URLField("Объявление на Авито", max_length=500, blank=True)
+    # Для команды: видно всем сотрудникам — менеджерам это нужно отправлять гостям
+    checkin_instructions = models.TextField("Как заселить гостя", blank=True, help_text="Ключи, котёл, баня, выезд")
+    wifi_name = models.CharField("Wi-Fi: сеть", max_length=100, blank=True)
+    wifi_password = models.CharField("Wi-Fi: пароль", max_length=100, blank=True)
+    lockbox_code = models.CharField("Код сейфа с ключами", max_length=50, blank=True)
+    team_contacts = models.TextField("Контакты команды", blank=True, help_text="Уборка, сантехник, электрик…")
+    admin_notes = models.TextField("Заметки только для администратора", blank=True)
+
     class Meta:
         verbose_name = "Дом"
         verbose_name_plural = "Дом"
 
     def __str__(self):
         return self.name
+
+    @staticmethod
+    def lines(text: str) -> list[str]:
+        return [line.strip(" •-–\t") for line in (text or "").splitlines() if line.strip(" •-–\t")]
+
+    @property
+    def map_url(self) -> str:
+        from urllib.parse import quote
+
+        return f"https://yandex.ru/maps/?text={quote(self.address)}" if self.address else ""
 
     @classmethod
     def get(cls) -> "House":
@@ -512,3 +547,27 @@ class Invite(models.Model):
     @property
     def is_valid(self) -> bool:
         return self.status == "active"
+
+
+class HousePhoto(models.Model):
+    """Фото дома. Хранится уменьшенная копия без метаданных (геометки удаляются) и превью."""
+
+    image = models.CharField(max_length=200, editable=False)  # путь в DATA_DIR/media
+    thumb = models.CharField(max_length=200, editable=False)
+    width = models.PositiveIntegerField(default=0, editable=False)
+    height = models.PositiveIntegerField(default=0, editable=False)
+    caption = models.CharField("Подпись", max_length=200, blank=True)
+    position = models.PositiveIntegerField(default=0)
+    is_cover = models.BooleanField("Главное фото", default=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Фото дома"
+        verbose_name_plural = "Фото дома"
+        ordering = ["position", "pk"]
+
+    def __str__(self):
+        return self.caption or f"Фото {self.pk}"

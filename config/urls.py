@@ -4,7 +4,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import redirect_to_login
 from django.urls import path, reverse
 
-from booking import accounts, guests, import_views, views
+from booking import accounts, guests, house, import_views, views
 
 urlpatterns = [
     path("", views.calendar_view, name="calendar"),
@@ -23,6 +23,11 @@ urlpatterns = [
     path("guests/<int:pk>/", guests.guest_edit, name="guest_edit"),
     path("guests/<int:pk>/delete/", guests.guest_delete, name="guest_delete"),
     path("guests/<int:pk>/merge/", guests.guest_merge, name="guest_merge"),
+    path("house/", house.house_view, name="house"),
+    path("house/edit/", house.house_edit, name="house_edit"),
+    path("house/photos/upload/", house.photo_upload, name="photo_upload"),
+    path("house/photos/<int:pk>/", house.photo_update, name="photo_update"),
+    path("house/photos/<int:pk>/<str:size>.jpg", house.photo_file, name="photo_file"),
     path("prices/", views.prices_view, name="prices"),
     path("prices/rules/new/", views.rule_edit, name="rule_create"),
     path("prices/rules/<int:pk>/", views.rule_edit, name="rule_edit"),

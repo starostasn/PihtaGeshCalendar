@@ -20,6 +20,14 @@
       if (!r.ok) { box.hidden = true; return; }
       const q = await r.json();
       let html = `${q.nights} ноч. · по нашим ценам <b>${fmt(q.total)} ₽</b>`;
+      const prepay = Number(form.dataset.prepay || 0);
+      const totalNow = Number((total && total.value) || q.total);
+      if (prepay && totalNow) {
+        const amount = Math.round(totalNow * prepay / 100 / 100) * 100;
+        html += ` · предоплата ${prepay}% — ${fmt(amount)} ₽`;
+        const initial = form.querySelector("[name=initial_payment]");
+        if (initial) initial.placeholder = amount;
+      }
       if (!q.min_stay_ok) html += ` · <span class="bad">меньше минимального срока (${q.min_stay} н.)</span>`;
       if (!q.available) html += ` · <span class="bad">даты заняты</span>`;
       box.innerHTML = html;

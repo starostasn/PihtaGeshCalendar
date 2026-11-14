@@ -43,7 +43,9 @@ if ! restic cat config >/dev/null 2>&1; then
 fi
 
 STEP="отправка копии"
-restic backup "$APP_DIR/data/backups" --tag db --host pihta-calendar --quiet
+TARGETS=("$APP_DIR/data/backups")
+[ -d "$APP_DIR/data/media" ] && TARGETS+=("$APP_DIR/data/media")  # фото дома
+restic backup "${TARGETS[@]}" --tag db --host pihta-calendar --quiet
 
 STEP="удаление старых копий"
 restic forget --tag db --host pihta-calendar --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune --quiet
