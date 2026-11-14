@@ -724,3 +724,39 @@ class LoginThrottleTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(self.client.get(reverse("calendar")).status_code, 200)  # сессия сохранилась
         self.assertTrue(User.objects.get(username="owner").check_password("Brand-new-pass-1"))
+
+
+# ---------------------------------------------------------------- заголовки безопасности и /admin/
+
+
+class SecurityHeadersTests(TestCase):
+    def test_headers_present(self):
+        resp = self.client.get(reverse("login"))
+        csp = resp.headers["Content-Security-Policy"]
+        self.assertIn("script-src 'self'", csp)
+        self.assertIn("frame-ancestors 'none'", csp)
+        self.assertIn("camera=()", resp.headers["Permissions-Policy"])
+        self.assertEqual(resp.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(resp.headers["Referrer-Policy"], "same-origin")
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_no_inline_scripts_in_pages(self):
+        import re
+
+        admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(admin)
+        ch = Channel.objects.create(name="Авито")
+        b = Booking.objects.create(check_in=d(1), check_out=d(3), total_price=1000)
+        Payment.objects.create(booking=b, amount=100)
+        Invite.objects.create(name="Тест")
+        PriceRule.objects.create(name="Выходные", weekdays="4,5", price=1)
+        urls = [reverse(n) for n in ("calendar", "booking_list", "prices", "stats", "channels", "users", "account")]
+        urls += [reverse("booking_edit", args=[b.pk]), reverse("channel_edit", args=[ch.pk])]
+        for url in urls:
+            html = self.client.get(url).content.decode()
+            self.assertNotRegex(html, r"\son(click|submit|change|load)=", url)
+            for tag in re.findall(r"<script[^>]*>", html):
+                self.assertTrue("src=" in tag or 'type="application/json"' in tag, (url, tag))
+
+    def test_django_admin_disabled_by_default(self):
+        self.assertEqual(self.client.get("/admin/").status_code, 404)

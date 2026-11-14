@@ -113,7 +113,7 @@ docker compose exec web python manage.py createsuperuser
 3. Напишите своему боту `/start`, затем: `docker compose exec web python manage.py telegram_chat_id`.
 4. Впишите полученный `TELEGRAM_CHAT_ID=...` в `.env` и снова `docker compose up -d`.
 
-### 5. Резервные копии
+### 5. Резервные копии (локальные; лучше настроить копии вне сервера — см. «Безопасность»)
 
 ```bash
 crontab -e
@@ -123,6 +123,58 @@ crontab -e
 
 Вся база — это один файл `data/db.sqlite3`. Копии стоит периодически забирать с сервера
 (например, на Яндекс Диск).
+
+## Безопасность
+
+### В самом календаре
+
+- Заголовки безопасности: HSTS (только HTTPS), Content-Security-Policy (выполняются только свои скрипты,
+  встраивать календарь в чужие сайты нельзя), запрет доступа к камере, микрофону и геолокации.
+- Служебная админка Django `/admin/` выключена. Включить при необходимости: `ENABLE_DJANGO_ADMIN=1` в `.env`
+  (вход в неё всё равно идёт через страницу входа календаря с защитой от перебора).
+- Защита входа от перебора паролей, роли, приглашения — см. «Пользователи и роли».
+
+### Защита сервера
+
+1. Создайте SSH-ключ на компьютере (PowerShell; на вопросы просто нажимайте Enter или задайте пароль ключа):
+   `ssh-keygen -t ed25519`
+2. Скопируйте ключ на сервер (один раз введёте пароль сервера):
+   `type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@IP_СЕРВЕРА "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"`
+3. Проверьте вход по ключу: `ssh root@IP_СЕРВЕРА` — пароль сервера спрашиваться не должен.
+4. На сервере запустите: `bash /opt/guesthouse/scripts/harden_server.sh`. Скрипт отключит вход по паролю
+   (только по ключу), включит fail2ban, файрвол (открыты 22, 80, 443) и автоматические обновления безопасности.
+5. Не закрывая окно, проверьте вход в новом окне. Если что-то пошло не так — веб-консоль в панели хостинга.
+
+### Резервные копии вне сервера
+
+Копия базы шифруется паролем и раз в сутки отправляется в S3-хранилище (restic); хранятся 14 ежедневных,
+8 еженедельных и 12 ежемесячных копий. При ошибке приходит сообщение в Telegram.
+
+1. Создайте бакет в S3-хранилище (например, Yandex Object Storage) и статический ключ доступа.
+2. На сервере: `apt-get install -y restic`, затем `cp /opt/guesthouse/scripts/backup.env.example /root/.pihta-backup.env`,
+   `chmod 600 /root/.pihta-backup.env` и впишите в файл адрес бакета, ключи и пароль шифрования.
+   **Пароль шифрования сохраните отдельно** — без него копии не восстановить.
+3. Первый запуск вручную: `bash /opt/guesthouse/scripts/offsite_backup.sh`
+4. Ежедневный запуск (заменяет локальную копию `backup_db` — она делается внутри скрипта):
+   `(crontab -l 2>/dev/null | grep -v backup_db; echo "30 3 * * * bash /opt/guesthouse/scripts/offsite_backup.sh >> /var/log/pihta-backup.log 2>&1") | crontab -`
+
+Восстановление:
+
+```bash
+set -a; . /root/.pihta-backup.env; set +a
+restic snapshots                                   # список копий
+restic restore latest --target /root/restore       # или ID нужной копии вместо latest
+F=$(find /root/restore -name 'db-*.sqlite3' | sort | tail -1); echo "$F"
+cd /opt/guesthouse && docker compose stop web worker
+cp data/db.sqlite3 data/db.sqlite3.before-restore
+cp "$F" data/db.sqlite3 && rm -f data/db.sqlite3-wal data/db.sqlite3-shm
+docker compose start web worker
+```
+
+### Аккаунты
+
+Включите двухфакторную защиту в личном кабинете reg.ru (через него можно увести домен) и на GitHub
+(Settings → Password and authentication).
 
 ### Обновление
 

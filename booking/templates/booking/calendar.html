@@ -22,7 +22,7 @@
 </div>
 <p class="muted small">Нажмите на дату заезда, затем на дату выезда — откроется форма брони. Нажмите на бронь, чтобы открыть её.</p>
 
-<div class="months">
+<div class="months" data-new-url="{% url 'booking_create' %}">
 {% for month in months %}
   <section class="month card">
     <h2>{{ month.title }}</h2>
@@ -75,6 +75,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script>window.BOOKING_NEW_URL = "{% url 'booking_create' %}";</script>
 <script src="{% static 'booking/calendar.js' %}"></script>
 {% endblock %}

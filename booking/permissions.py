@@ -36,7 +36,7 @@ def role_label(user) -> str:
 
 
 def set_role(user, role: str) -> None:
-    """Администратор получает и доступ к служебной админке Django (/admin/)."""
+    """Администратор получает и доступ к служебной админке Django (/admin/), если она включена."""
     user.is_superuser = user.is_staff = role == ROLE_ADMIN
 
 

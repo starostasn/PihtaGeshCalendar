@@ -36,7 +36,7 @@
   </p>
   <p class="small" style="margin-bottom:4px"><b>Наш календарь для «{{ ch.name }}»</b> (вставьте на площадке):</p>
   <code class="url" id="url{{ ch.pk }}">{{ ch.export_url }}</code>
-  <button class="btn small" type="button" onclick="navigator.clipboard.writeText(document.getElementById('url{{ ch.pk }}').textContent); this.textContent='Скопировано'">Копировать</button>
+  <button class="btn small" type="button" data-copy="url{{ ch.pk }}">Копировать</button>
 </section>
 {% empty %}
 <div class="card">

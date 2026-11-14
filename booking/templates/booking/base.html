@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}Календарь{% endblock %} · {{ house.name|default:"Гостевой дом" }}</title>
   <link rel="stylesheet" href="{% static 'booking/style.css' %}">
+  <script src="{% static 'booking/app.js' %}" defer></script>
 </head>
 <body>
 {% if user.is_authenticated %}

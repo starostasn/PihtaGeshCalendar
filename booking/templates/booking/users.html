@@ -53,12 +53,12 @@
       <div class="row" style="justify-content:space-between">
         <span><b>{{ inv.name|default:"Без имени" }}</b> · {% if inv.role == 'admin' %}<span class="role role-admin">Администратор</span>{% else %}<span class="role role-manager">Менеджер</span>{% endif %}
           <span class="muted small">· до {{ inv.expires_at|date:"d.m.Y H:i" }}</span></span>
-        <form class="inline" method="post" action="{% url 'invite_revoke' inv.pk %}" onsubmit="return confirm('Отозвать приглашение? Ссылка перестанет работать.')">
+        <form class="inline" method="post" action="{% url 'invite_revoke' inv.pk %}" data-confirm="Отозвать приглашение? Ссылка перестанет работать.">
           {% csrf_token %}<button class="btn small danger" type="submit">Отозвать</button>
         </form>
       </div>
       <code class="url" id="inv{{ inv.pk }}">{{ inv.url }}</code>
-      <button class="btn small" type="button" onclick="navigator.clipboard.writeText(document.getElementById('inv{{ inv.pk }}').textContent); this.textContent='Скопировано'">Копировать ссылку</button>
+      <button class="btn small" type="button" data-copy="inv{{ inv.pk }}">Копировать ссылку</button>
     </li>
     {% endfor %}
   </ul>

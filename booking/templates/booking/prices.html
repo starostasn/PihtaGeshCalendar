@@ -55,7 +55,7 @@
       <td>{{ r.price|rub }}</td>
       <td>{{ r.min_stay|default:"—" }}</td>
       <td>{{ r.priority }}</td>
-      <td>{% if is_admin %}<form class="inline" method="post" action="{% url 'rule_delete' r.pk %}" onsubmit="return confirm('Удалить правило?')">{% csrf_token %}<button class="btn small danger" type="submit">Удалить</button></form>{% endif %}</td>
+      <td>{% if is_admin %}<form class="inline" method="post" action="{% url 'rule_delete' r.pk %}" data-confirm="Удалить правило?">{% csrf_token %}<button class="btn small danger" type="submit">Удалить</button></form>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

@@ -1,6 +1,8 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.contrib.auth.views import redirect_to_login
+from django.urls import path, reverse
 
 from booking import accounts, views
 
@@ -32,5 +34,11 @@ urlpatterns = [
     path("account/", accounts.account_view, name="account"),
     path("login/", accounts.ThrottledLoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
-    path("admin/", admin.site.urls),
 ]
+
+if settings.ENABLE_DJANGO_ADMIN:
+    # Вход в админку идёт через общую страницу входа календаря с защитой от перебора паролей.
+    admin.site.login = lambda request, extra_context=None: redirect_to_login(
+        request.get_full_path(), reverse("login")
+    )
+    urlpatterns.append(path("admin/", admin.site.urls))

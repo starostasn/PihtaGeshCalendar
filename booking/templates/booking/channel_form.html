@@ -24,7 +24,7 @@
   <h2 style="margin-top:0">Наш календарь для «{{ channel.name }}»</h2>
   <code class="url">{{ export_url }}</code>
   <p class="small muted">В него попадают все занятые даты, кроме броней, пришедших с самой «{{ channel.name }}».</p>
-  <form method="post" action="{% url 'channel_new_token' channel.pk %}" onsubmit="return confirm('Старая ссылка перестанет работать. Продолжить?')">
+  <form method="post" action="{% url 'channel_new_token' channel.pk %}" data-confirm="Старая ссылка перестанет работать. Продолжить?">
     {% csrf_token %}<button class="btn small danger" type="submit">Сменить ссылку</button>
   </form>
 </div>

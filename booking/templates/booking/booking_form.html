@@ -109,7 +109,7 @@
       <td class="small muted">{% if p.created_by %}{{ p.created_by.get_full_name|default:p.created_by.username }}{% endif %}</td>
       <td class="num">
         {% if is_admin %}
-        <form class="inline" method="post" action="{% url 'payment_delete' p.pk %}" onsubmit="return confirm('Удалить платёж?')">
+        <form class="inline" method="post" action="{% url 'payment_delete' p.pk %}" data-confirm="Удалить платёж?">
           {% csrf_token %}<button class="btn small danger" type="submit" aria-label="Удалить платёж">Удалить</button>
         </form>
         {% endif %}

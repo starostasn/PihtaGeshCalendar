@@ -41,7 +41,8 @@
         hintText.textContent = "Заезд " + fmt(iso) + " — выберите дату выезда";
         return;
       }
-      const url = window.BOOKING_NEW_URL + "?check_in=" + start + "&check_out=" + iso;
+      const newUrl = document.querySelector(".months").dataset.newUrl;
+      const url = newUrl + "?check_in=" + start + "&check_out=" + iso;
       window.location = url;
     });
     el.addEventListener("mouseenter", () => { if (start !== null && el.dataset.date > start) highlight(el.dataset.date); });

@@ -45,6 +45,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "booking.middleware.SecurityHeadersMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -129,6 +130,30 @@ if USE_HTTPS:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # HSTS: браузер год будет открывать сайт только по HTTPS (без поддоменов — они могут жить отдельно)
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", str(365 * 24 * 3600)))
+
+# Заголовки безопасности (см. booking/middleware.py). Скрипты — только свои файлы, никаких встроенных
+# и чужих; встраивать календарь в чужие сайты нельзя; формы отправляются только сюда же.
+CONTENT_SECURITY_POLICY = os.environ.get(
+    "CONTENT_SECURITY_POLICY",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
+    "frame-ancestors 'none'",
+)
+PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+SECURE_REFERRER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
+
+# Служебная админка Django (/admin/) по умолчанию выключена: всё нужное есть в самом календаре,
+# а лишняя страница входа — лишняя цель для подбора паролей.
+ENABLE_DJANGO_ADMIN = env_bool("ENABLE_DJANGO_ADMIN", default=False)
+
+SILENCED_SYSTEM_CHECKS = [
+    "security.W008",  # HTTP -> HTTPS перенаправляет Caddy; в Django это сломало бы проверку здоровья контейнера
+    "security.W005",  # HSTS без поддоменов — намеренно, поддомены могут обслуживаться отдельно
+    "security.W021",  # в список предзагрузки браузеров не вносим — это необратимо на месяцы
+]
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 30  # месяц, чтобы не логиниться с телефона каждый день
 
 # Telegram-уведомления владельцу (необязательно). Как получить — см. README.
