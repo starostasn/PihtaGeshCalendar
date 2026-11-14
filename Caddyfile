@@ -1,4 +1,9 @@
-{$DOMAIN} {
+# Основной адрес — DOMAIN; дополнительные (например, www) — EXTRA_DOMAINS через пробел.
+# Сертификаты Let's Encrypt выпускаются для всех адресов, дополнительные перенаправляются на основной.
+{$DOMAIN} {$EXTRA_DOMAINS} {
+	@other not host {$DOMAIN}
+	redir @other https://{$DOMAIN}{uri} permanent
+
 	encode gzip
 	reverse_proxy web:8000
 }

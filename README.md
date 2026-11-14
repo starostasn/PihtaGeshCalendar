@@ -79,6 +79,10 @@ docker compose exec web python manage.py createsuperuser
 
 Откройте `https://calendar.ваш-домен.ru` — сертификат HTTPS выпустится автоматически за минуту.
 
+Чтобы сервис открывался ещё и по другим адресам (например, `www.ваш-домен.ru`), перечислите их через пробел
+в `EXTRA_DOMAINS` в `.env` (для каждого нужна A-запись на IP сервера) и перезапустите Caddy:
+`docker compose up -d --force-recreate caddy`. С этих адресов будет перенаправление на основной.
+
 Если `docker compose` не может скачать образы (Docker Hub бывает недоступен с российских IP),
 пропишите зеркало в `/etc/docker/daemon.json`, например `{"registry-mirrors": ["https://mirror.gcr.io"]}`
 (или зеркало вашего хостера) и выполните `systemctl restart docker`.
