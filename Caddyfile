@@ -5,5 +5,7 @@
 	redir @other https://{$DOMAIN}{uri} permanent
 
 	encode gzip
+	# Не сообщать, на каком ПО работает сервер (ни Caddy, ни gunicorn)
+	header -Server
 	reverse_proxy web:8000
 }
