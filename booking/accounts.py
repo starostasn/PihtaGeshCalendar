@@ -191,6 +191,16 @@ class ThrottledLoginView(LoginView):
     template_name = "booking/login.html"
     redirect_authenticated_user = True
 
+    def get_context_data(self, **kwargs):
+        from .models import House, HousePhoto
+
+        ctx = super().get_context_data(**kwargs)
+        cover = HousePhoto.objects.filter(is_cover=True).first()
+        ctx["house_name"] = House.get().name
+        ctx["cover_url"] = reverse("house_cover") + f"?v={cover.pk}" if cover else ""
+        ctx["winter"] = timezone.localdate().month in (11, 12, 1, 2, 3, 4)
+        return ctx
+
     def _keys(self):
         ip = client_ip(self.request)
         username = (self.request.POST.get("username") or "").strip().lower()

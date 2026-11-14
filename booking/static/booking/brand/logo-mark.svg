@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Пихта">
+  <rect width="64" height="64" rx="14" fill="#1f2b3a"/>
+  <path d="M5 52 L12 33 L8.5 34.5 L14.5 19 L20.5 34.5 L17 33 L24 52 Z" fill="#7a92aa"/>
+  <path d="M40 52 L47 30 L43.5 31.5 L50 14 L56.5 31.5 L53 30 L60 52 Z" fill="#3e9b4f"/>
+  <path d="M0 52 H64 V64 H0 Z" fill="#e3e9f0" opacity=".16"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 40 L49 58" stroke-width="4"/>
+    <path d="M13 58 L49 40" stroke-width="4"/>
+    <path d="M36 19 L 28 30" stroke-width="7.5"/>
+    <path d="M28 30 L 37 36 L 31 47" stroke-width="5.2"/>
+    <path d="M27.5 32 L 33.5 40 L 26.5 49" stroke-width="5.2"/>
+    <path d="M35 21 L 44 27" stroke-width="3.6"/>
+  </g>
+  <circle cx="40" cy="13" r="5" fill="#ffffff"/>
+</svg>

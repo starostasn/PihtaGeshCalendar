@@ -116,7 +116,8 @@
     {% csrf_token %}
     <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple required>
     <button class="btn primary" type="submit">Загрузить</button>
-    <span class="muted small">JPEG, PNG или WebP, до 15 МБ каждое, всего до {{ max_photos }} фото. Геометки и другие метаданные удаляются.</span>
+    <span class="muted small">JPEG, PNG или WebP, до 15 МБ каждое, всего до {{ max_photos }} фото. Геометки и другие метаданные удаляются.
+      Главное фото видно и без входа — им оформлена страница входа.</span>
   </form>
   {% if photos %}
   <ul class="photo-admin">

@@ -102,7 +102,8 @@ def _build_month(year: int, month: int, bookings: list[Booking], calc: PriceCalc
                     day.ending = b
             row.append(day)
         weeks.append(row)
-    return {"year": year, "month": month, "title": f"{MONTH_NAMES[month]} {year}", "weeks": weeks}
+    season = month in (11, 12, 1, 2, 3, 4)  # горнолыжный сезон в Шерегеше — примерно с ноября по апрель
+    return {"year": year, "month": month, "title": f"{MONTH_NAMES[month]} {year}", "weeks": weeks, "season": season}
 
 
 @login_required

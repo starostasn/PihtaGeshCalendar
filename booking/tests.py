@@ -1109,7 +1109,7 @@ class HousePhotoTests(TestCase):
         return self.client.post(reverse("photo_upload"), {"photos": list(files)})
 
     def test_upload_strips_metadata_resizes_and_rotates(self):
-        self.upload(SimpleUploadedFile("IMG_0001.jpg", make_jpeg(3000, 2000, orientation=6), "image/jpeg"))
+        self.upload(SimpleUploadedFile("Пихта — дом зимой.jpg", make_jpeg(3000, 2000, orientation=6), "image/jpeg"))
         photo = HousePhoto.objects.get()
         self.assertTrue(photo.is_cover)  # первое фото становится главным
         full = Path(self.tmp.name) / "media" / photo.image

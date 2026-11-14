@@ -1,5 +1,16 @@
 // Общие действия на всех страницах (вместо встроенных onclick/onsubmit — их запрещает политика безопасности CSP).
 (function () {
+  // Меню на телефоне
+  const topbar = document.getElementById("topbar");
+  const toggle = topbar && topbar.querySelector(".nav-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const open = topbar.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "✕ Закрыть" : "☰ Меню";
+    });
+  }
+
   // <form data-confirm="Текст вопроса"> — спросить подтверждение перед отправкой
   document.addEventListener("submit", (e) => {
     const form = e.target.closest("form[data-confirm]");

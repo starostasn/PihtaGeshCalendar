@@ -1,11 +1,28 @@
+/* Фирменный стиль «Пихта»: снег, хвоя и тёмно-синий лыжник с вывески. Контраст текста ≥ 4.5:1. */
+@font-face {
+  font-family: "Unbounded"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/unbounded-cyrillic-600-normal.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Unbounded"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/unbounded-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212;
+}
 :root {
-  --bg: #f6f7f9;
+  --bg: #f4f6f9;
   --card: #ffffff;
-  --text: #1d2330;
-  --muted: #6b7280;
-  --line: #e3e6eb;
-  --accent: #2563eb;
+  --text: #1f2b3a;
+  --muted: #5f6b7a;
+  --line: #e1e6ec;
+  --accent: #2f7d3f;
   --accent-text: #ffffff;
+  --brand-navy: #1f2b3a;
+  --brand-green: #3e9b4f;
+  --brand-fir: #3e7d5a;
+  --brand-slate: #7a92aa;
+  --brand-snow: #e3e9f0;
+  --font-display: "Unbounded", system-ui, sans-serif;
   --danger: #c62828;
   --warn-bg: #fff4e5;
   --warn-text: #7a4b00;
@@ -13,8 +30,8 @@
   --ok-text: #1b5e20;
   --err-bg: #fdecea;
   --err-text: #8e1c1c;
-  --sel: #dbe7ff;
-  --radius: 10px;
+  --sel: #e3f1e6;
+  --radius: 12px;
   --ok-strong: #2E7D32;
   --req-bg: #ede7f6;
   --req-text: #4527a0;
@@ -27,27 +44,31 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12151b;
-    --card: #1b1f27;
-    --text: #e7e9ee;
-    --muted: #9aa3b2;
-    --line: #2c323d;
-    --accent: #5b8cff;
+    --bg: #0e1621;
+    --card: #162130;
+    --text: #e6ebf1;
+    --muted: #9aa7b6;
+    --line: #263445;
+    --accent: #5cbf6e;
+    --accent-text: #0e1621;
+    --danger: #ff7b7b;
+    --brand-navy: #e6ebf1;
+    --brand-snow: #22303f;
     --warn-bg: #3a2c12;
     --warn-text: #ffd08a;
     --ok-bg: #16301b;
     --ok-text: #9be3a5;
     --err-bg: #3b1717;
     --err-text: #ffb4ab;
-    --sel: #243556;
+    --sel: #1f3a2a;
     --ok-strong: #3f9a47;
     --req-bg: #2c2347;
     --req-text: #c9b8ff;
     --req-strong: #7d64d8;
     --series-1: #3987e5;
     --series-1-soft: #1c5cab;
-    --grid: #2a2f39;
-    --axis: #3a404c;
+    --grid: #233142;
+    --axis: #34465a;
   }
 }
 
@@ -62,7 +83,8 @@ body {
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 a { color: var(--accent); }
-h1 { font-size: 22px; margin: 0 0 12px; }
+@media (prefers-color-scheme: dark) { a { color: #6fcf80; } }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 21px; letter-spacing: -0.01em; margin: 0 0 12px; }
 h2 { font-size: 18px; margin: 24px 0 10px; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
@@ -72,7 +94,22 @@ h2 { font-size: 18px; margin: 24px 0 10px; }
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--line);
 }
-.topbar .brand { font-weight: 700; margin-right: auto; text-decoration: none; color: var(--text); }
+/* силуэт пихт под шапкой */
+.topbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -9px; height: 9px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='9' viewBox='0 0 120 9'%3E%3Cpath d='M0 9 L6 3 L9 6 L14 0 L19 6 L22 3 L28 9 Z M46 9 L50 5 L53 7 L57 2 L61 7 L64 5 L68 9 Z M86 9 L91 4 L94 6 L99 1 L104 6 L107 4 L112 9 Z' fill='%237a92aa' opacity='.22'/%3E%3C/svg%3E") repeat-x left bottom;
+}
+.topbar .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; text-decoration: none; color: var(--text); }
+.topbar .brand img { display: block; border-radius: 8px; }
+.brand-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: 0.01em; }
+.nav-toggle { display: none; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+@media (max-width: 1040px) {
+  .nav-toggle { display: inline-flex; gap: 6px; align-items: center; }
+  .topbar nav { display: none; width: 100%; flex-direction: column; gap: 2px; padding: 8px 0 4px; }
+  .topbar.open nav { display: flex; }
+  .topbar nav a, .topbar nav button { padding: 10px 12px; font-size: 16px !important; text-align: left; }
+  .topbar nav form { display: block; }
+}
 .topbar nav { display: flex; gap: 2px; flex-wrap: wrap; }
 .topbar nav a, .topbar nav button {
   padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--text);
@@ -167,7 +204,7 @@ code.url { display: block; padding: 8px; background: var(--bg); border: 1px soli
 @media (max-width: 480px) {
   main { padding: 12px; }
   .topbar { padding: 6px 10px; }
-  .topbar nav a, .topbar nav button { padding: 6px 7px; font-size: 14px; }
+  .brand-name { font-size: 15px; }
   .day { min-height: 60px; padding: 2px 3px; }
   .day .bar, .day .tail, .day .lbl { top: 21px; height: 18px; line-height: 18px; }
   .day .bar.start { border-radius: 9px 0 0 9px; }
@@ -355,3 +392,40 @@ ul.clean li { margin: 4px 0; }
   .facts li { min-width: 0; flex: 1 1 40%; }
   .photo-admin input[type=text] { min-width: 0; flex: 1 1 100%; }
 }
+
+/* ---------- вход */
+.login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; position: relative; overflow: hidden;
+  background: linear-gradient(180deg, #cfd9e4 0%, #eef2f6 60%, #f7f9fb 100%); }
+.login-bg { position: absolute; inset: 0; background-size: cover; background-position: center 65%; }
+.login-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(14,22,33,.15), rgba(14,22,33,.45)); }
+.login-illustration { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: auto; }
+#snow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.login-card { position: relative; z-index: 2; width: min(400px, 100%); padding: 24px; border-radius: 18px;
+  background: color-mix(in srgb, var(--card) 88%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  box-shadow: 0 20px 50px rgba(14,22,33,.25); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.login-card .logo { display: block; width: 100%; max-width: 300px; margin: 0 auto 6px; }
+.login-card .sub { text-align: center; color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+.login-card .btn.primary { width: 100%; padding: 11px; font-size: 16px; }
+.login-card .form input { max-width: none; }
+.login-foot { position: relative; z-index: 2; margin-top: 14px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+@media (prefers-color-scheme: dark) {
+  .login-page { background: linear-gradient(180deg, #0b121b 0%, #132031 100%); }
+}
+
+/* ---------- логотип (встроенный SVG, цвета из темы) */
+.lg-snow { fill: var(--brand-snow); }
+.lg-fir-a { fill: var(--brand-slate); }
+.lg-fir-b { fill: var(--brand-fir); }
+.lg-letters { stroke: var(--brand-green); }
+.lg-skier { stroke: var(--brand-navy); }
+.lg-head { fill: var(--brand-navy); }
+
+/* ---------- сезон в календаре */
+.season { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+
+/* единый вид фокуса для полей ввода */
+.form input:focus, .form select:focus, .form textarea:focus, .gp-input:focus, .search-input:focus, .custom-range input:focus {
+  outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
+}
+.btn:focus-visible, .topbar nav a:focus-visible, .nav-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary:hover { filter: brightness(1.08); }

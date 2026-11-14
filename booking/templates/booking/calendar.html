@@ -25,7 +25,7 @@
 <div class="months" data-new-url="{% url 'booking_create' %}">
 {% for month in months %}
   <section class="month card">
-    <h2>{{ month.title }}</h2>
+    <h2>{{ month.title }}{% if month.season %}<span class="season" title="Горнолыжный сезон">❄ сезон</span>{% endif %}</h2>
     <div class="cal">
       {% for wd in weekday_names %}<div class="wd">{{ wd }}</div>{% endfor %}
       {% for week in month.weeks %}{% for day in week %}

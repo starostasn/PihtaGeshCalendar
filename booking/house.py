@@ -213,6 +213,45 @@ def photo_update(request, pk: int):
     return redirect("/house/#photos")
 
 
+def house_cover(request):
+    """Главное фото — единственное, что видно без входа: им оформлена страница входа."""
+    photo = HousePhoto.objects.filter(is_cover=True).first()
+    if photo is None:
+        raise Http404()
+    path = (media_root() / photo.image).resolve()
+    if not path.is_file():
+        raise Http404()
+    resp = FileResponse(open(path, "rb"), content_type="image/jpeg")
+    resp["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+def manifest(request):
+    """Манифест приложения: календарь можно добавить на главный экран телефона."""
+    from django.http import JsonResponse
+    from django.templatetags.static import static
+
+    name = House.get().name
+    data = {
+        "name": f"{name} — календарь",
+        "short_name": name[:12],
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#f4f6f9",
+        "theme_color": "#1f2b3a",
+        "lang": "ru",
+        "icons": [
+            {"src": static("booking/brand/icon-192.png"), "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": static("booking/brand/icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+            {"src": static("booking/brand/logo-mark.svg"), "sizes": "any", "type": "image/svg+xml"},
+        ],
+    }
+    resp = JsonResponse(data, json_dumps_params={"ensure_ascii": False})
+    resp["Content-Type"] = "application/manifest+json; charset=utf-8"
+    return resp
+
+
 @login_required
 def photo_file(request, pk: int, size: str):
     photo = get_object_or_404(HousePhoto, pk=pk)
