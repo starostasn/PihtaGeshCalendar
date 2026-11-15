@@ -38,7 +38,7 @@ def build_export(channel: Channel | None = None) -> bytes:
     # Заявки на площадки не отдаём: даты закрываются только подтверждёнными бронями.
     qs = Booking.objects.confirmed().filter(check_out__gte=today - timedelta(days=EXPORT_PAST_DAYS))
     if channel is not None:
-        qs = qs.exclude(channel=channel, external_uid__gt="")
+        qs = qs.exclude(channel=channel, external_uid__gt="").exclude(channel=channel, avito_booking_id__isnull=False)
 
     host = settings.DOMAIN or "localhost"
     stamp = timezone.now()
@@ -270,15 +270,18 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
                 result.created.append(booking)
                 continue
 
+            # Статус брони, которую ведёт API Авито (ждёт оплаты или отменена), задаёт API, а не iCal.
+            keep_status = booking.avito_status in ("pending", "canceled")
             changed = (
                 booking.check_in != ev.start
                 or booking.check_out != ev.end
-                or booking.status != Booking.Status.CONFIRMED
+                or (not keep_status and booking.status != Booking.Status.CONFIRMED)
             )
             if changed:
                 booking.check_in, booking.check_out = ev.start, ev.end
-                booking.status = Booking.Status.CONFIRMED
-                booking.cancel_reason = ""
+                if not keep_status:
+                    booking.status = Booking.Status.CONFIRMED
+                    booking.cancel_reason = ""
                 booking.external_summary = ev.summary[:500]
                 booking.save()
                 result.updated.append(booking)

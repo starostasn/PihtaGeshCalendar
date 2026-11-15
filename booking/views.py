@@ -419,8 +419,12 @@ def channels_view(request):
         ch.export_url = export_url(ch)
     logs = SyncLog.objects.select_related("channel")[:30]
     local_mode = urlsplit(settings.PUBLIC_BASE_URL).hostname in {"127.0.0.1", "localhost"}
+    from .models import AvitoAccount
+
     return render(
-        request, "booking/channels.html", {"channels": channels, "logs": logs, "local_mode": local_mode}
+        request,
+        "booking/channels.html",
+        {"channels": channels, "logs": logs, "local_mode": local_mode, "avito": AvitoAccount.get()},
     )
 
 

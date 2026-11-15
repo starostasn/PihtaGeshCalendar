@@ -4,7 +4,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import redirect_to_login
 from django.urls import path, reverse
 
-from booking import accounts, guests, house, import_views, merge, views
+from booking import accounts, avito_views, guests, house, import_views, merge, views
 
 urlpatterns = [
     path("", views.calendar_view, name="calendar"),
@@ -43,6 +43,13 @@ urlpatterns = [
     path("channels/<int:pk>/", views.channel_edit, name="channel_edit"),
     path("channels/<int:pk>/sync/", views.channel_sync, name="channel_sync"),
     path("channels/<int:pk>/new-token/", views.channel_new_token, name="channel_new_token"),
+    path("channels/avito/", avito_views.avito_view, name="avito"),
+    path("channels/avito/connect/", avito_views.avito_connect, name="avito_connect"),
+    path("channels/avito/connect-keys/", avito_views.avito_connect_client, name="avito_connect_client"),
+    path("channels/avito/check/", avito_views.avito_check, name="avito_check"),
+    path("channels/avito/sync/", avito_views.avito_sync, name="avito_sync"),
+    path("channels/avito/disconnect/", avito_views.avito_disconnect, name="avito_disconnect"),
+    path("avito/callback/", avito_views.avito_callback, name="avito_callback"),
     path("ical/<str:token>.ics", views.ical_export, name="ical_export"),
     path("users/", accounts.users_view, name="users"),
     path("users/new/", accounts.user_create, name="user_create"),

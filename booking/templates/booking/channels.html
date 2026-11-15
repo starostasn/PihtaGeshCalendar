@@ -13,6 +13,18 @@
   нужен сервер с доменом (см. README).</div>
 {% endif %}
 
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">Авито · API</h2>
+    {% if avito.is_connected %}
+      {% if avito.last_sync_ok is False %}<span class="badge err">ошибка</span>{% else %}<span class="badge ok">подключено</span>{% endif %}
+    {% else %}<span class="badge warn">не подключено</span>{% endif %}
+  </div>
+  <p class="small">Брони Авито с гостем, суммой, предоплатой и комиссией; закрытие дат на Авито сразу после изменения; цены.
+    {% if avito.is_connected and avito.last_sync_message %}<br>{{ avito.last_sync_at|timesince }} назад — {{ avito.last_sync_message }}{% endif %}</p>
+  <a class="btn small{% if not avito.is_connected %} primary{% endif %}" href="{% url 'avito' %}">{% if avito.is_connected %}Открыть{% else %}Подключить{% endif %}</a>
+</section>
+
 {% for ch in channels %}
 <section class="card">
   <div class="row" style="justify-content:space-between">

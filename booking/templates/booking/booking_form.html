@@ -29,6 +29,19 @@
       </form>
     </div>
   {% endfor %}
+  {% if booking and booking.is_from_avito_api %}
+    <div class="msg info small avito-box">
+      Бронь с Авито №{{ booking.avito_booking_id }} — данные приходят из API Авито. Даты и статус меняются только на Авито.
+      {% with d=booking.avito_data %}
+      <dl>
+        <dt>Статус на Авито</dt><dd>{% if booking.avito_status == 'active' %}оплачена{% elif booking.avito_status == 'pending' %}ждёт оплаты гостем{% elif booking.avito_status == 'canceled' %}отменена{% else %}{{ booking.avito_status|default:"—" }}{% endif %}</dd>
+        {% if d.contact %}<dt>Гость на Авито</dt><dd>{{ d.contact.name }}{% if d.contact.phone %}, +7{{ d.contact.phone }}{% endif %}{% if d.contact.email %}, {{ d.contact.email }}{% endif %}</dd>{% endif %}
+        {% if d.base_price is not None %}<dt>Стоимость проживания</dt><dd>{{ d.base_price|rub }} ₽{% if d.total_for_buyer and d.total_for_buyer != d.base_price %} (гость платит {{ d.total_for_buyer|rub }} ₽ с учётом скидки Авито){% endif %}</dd>{% endif %}
+        {% if d.safe_deposit %}<dt>Предоплата</dt><dd>{{ d.safe_deposit.total_amount|rub }} ₽ · вам {{ d.safe_deposit.owner_amount|rub }} ₽ · комиссия Авито {{ d.safe_deposit.tax|rub }} ₽</dd>{% endif %}
+      </dl>
+      {% endwith %}
+    </div>
+  {% endif %}
   {% if booking and booking.is_imported %}
     <div class="msg warning small" style="margin-top:12px">
       Бронь пришла с площадки «{{ booking.source_name }}» по iCal{% if booking.external_summary %} («{{ booking.external_summary }}»){% endif %}.

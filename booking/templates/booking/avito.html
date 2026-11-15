@@ -1,0 +1,118 @@
+{% extends "booking/base.html" %}
+{% load booking_extras %}
+{% block title %}Авито{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'channels' %}">← Площадки</a></div>
+<div class="cal-head">
+  <h1>Авито</h1>
+  <span class="muted">Интеграция через API: брони с гостем, суммами и предоплатой, закрытие дат и цены</span>
+</div>
+
+{% if not configured %}
+<section class="card">
+  <h2 style="margin-top:0">Шаг 1. Ключи приложения — на сервер</h2>
+  <p>Ключи <code>client_id</code> и <code>client_secret</code> из developers.avito.ru вписываются только в файл <code>.env</code>
+    на сервере — не пересылайте их в мессенджерах и не вставляйте сюда.</p>
+  <pre class="code">AVITO_CLIENT_ID=…
+AVITO_CLIENT_SECRET=…</pre>
+  <p>Затем перезапустите календарь: <code>docker compose up -d</code>. После этого здесь появится кнопка «Подключить Авито».</p>
+  <p class="small">В настройках приложения на Авито адрес возврата (Redirect URI) должен быть таким:</p>
+  <code class="url" id="redirectUri">{{ redirect_uri }}</code>
+  <button class="btn small" type="button" data-copy="redirectUri">Копировать</button>
+</section>
+{% else %}
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">Подключение</h2>
+    {% if account.is_connected %}
+      {% if account.last_sync_ok is None %}<span class="badge">подключено, ещё не синхронизировали</span>
+      {% elif account.last_sync_ok %}<span class="badge ok">работает</span>
+      {% else %}<span class="badge err">ошибка</span>{% endif %}
+    {% else %}<span class="badge warn">не подключено</span>{% endif %}
+  </div>
+
+  {% if account.is_connected %}
+  <p class="small">
+    Аккаунт Авито: <b>{{ account.user_name|default:"—" }}</b>{% if account.user_id %} (№{{ account.user_id }}){% endif %} ·
+    {{ account.get_mode_display }}{% if account.connected_at %} · подключено {{ account.connected_at|date:"d.m.Y H:i" }}{% endif %}<br>
+    Объявление: {% if account.item_id %}<b>№{{ account.item_id }}</b>{% else %}<span class="badge warn">не указано</span>{% endif %} ·
+    брони записываются как «{{ account.channel.name|default:'Авито' }}»<br>
+    {% if account.last_sync_at %}Последняя синхронизация: {{ account.last_sync_at|timesince }} назад — {{ account.last_sync_message }}<br>{% endif %}
+    {% if account.calendar_pushed_at %}Занятость на Авито: {{ account.calendar_pushed_at|timesince }} назад — {{ account.calendar_message }}<br>{% endif %}
+    {% if account.prices_pushed_at %}Цены на Авито: {{ account.prices_pushed_at|timesince }} назад — {{ account.prices_message }}{% endif %}
+  </p>
+  <div class="row">
+    <form class="inline" method="post" action="{% url 'avito_check' %}">{% csrf_token %}<button class="btn small" type="submit">Проверить</button></form>
+    <form class="inline" method="post" action="{% url 'avito_sync' %}">{% csrf_token %}<button class="btn small primary" type="submit">Синхронизировать сейчас</button></form>
+    <a class="btn small" href="{% url 'avito_connect' %}">Подключить заново</a>
+    <form class="inline" method="post" action="{% url 'avito_disconnect' %}" data-confirm="Отключить Авито? Брони в календаре останутся.">{% csrf_token %}<button class="btn small danger" type="submit">Отключить</button></form>
+  </div>
+  {% else %}
+  <p>Нажмите кнопку — откроется Авито. Войдите в аккаунт, где размещено объявление, и разрешите доступ календарю.</p>
+  <div class="row">
+    <a class="btn primary" href="{% url 'avito_connect' %}">Подключить Авито</a>
+    <form class="inline" method="post" action="{% url 'avito_connect_client' %}">{% csrf_token %}<button class="btn" type="submit">Подключить по ключам приложения</button></form>
+  </div>
+  <p class="muted small">Второй способ — без входа: работает, если Авито разрешает приложению доступ к собственному аккаунту
+    владельца. Если он выдаст ошибку, используйте первую кнопку.</p>
+  <p class="small">Адрес возврата (Redirect URI) в настройках приложения на Авито должен быть таким:
+    <code class="url" id="redirectUri">{{ redirect_uri }}</code>
+    <button class="btn small" type="button" data-copy="redirectUri">Копировать</button></p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Настройки</h2>
+  <form method="post" class="form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="grid2">
+      <p>{{ form.item_id.label_tag }}{{ form.item_id }}{{ form.item_id.errors }}<span class="helptext">{{ form.item_id.help_text }}</span></p>
+      <p>{{ form.channel.label_tag }}{{ form.channel }}{{ form.channel.errors }}<span class="helptext">{{ form.channel.help_text }}</span></p>
+    </div>
+    <p class="check">{{ form.sync_bookings }} <label for="{{ form.sync_bookings.id_for_label }}">{{ form.sync_bookings.label }}</label>
+      <span class="helptext">Каждые 10 минут: новые брони, гость (имя, телефон, e-mail), сумма, предоплата и комиссия Авито, отмены.</span></p>
+    <p class="check">{{ form.push_calendar }} <label for="{{ form.push_calendar.id_for_label }}">{{ form.push_calendar.label }}</label>
+      <span class="helptext">{{ form.push_calendar.help_text }} — в течение минуты после изменения.</span></p>
+    <p class="check">{{ form.push_prices }} <label for="{{ form.push_prices.id_for_label }}">{{ form.push_prices.label }}</label>
+      <span class="helptext">{{ form.push_prices.help_text }} Цены на Авито будут заменены — проверьте предпросмотр ниже.</span></p>
+    <button class="btn primary" type="submit">Сохранить</button>
+  </form>
+</section>
+
+<section class="charts">
+  <figure class="card chart-card">
+    <figcaption><h2>Даты, которые закроем на Авито</h2>
+      <span class="muted small">Прямые брони, брони других площадок и закрытые даты. Брони самого Авито не отправляются.</span></figcaption>
+    {% if intervals %}
+    <ul class="plain small">{% for i in intervals %}<li>{{ i.date_start|iso_date }} — {{ i.date_end|iso_date }} <span class="muted">({% if i.type == 'manual' %}закрыто{% else %}бронь{% endif %}, день выезда свободен)</span></li>{% endfor %}</ul>
+    {% else %}<p class="muted small">Сейчас нечего закрывать.</p>{% endif %}
+  </figure>
+  <figure class="card chart-card">
+    <figcaption><h2>Цены для Авито</h2>
+      <span class="muted small">Из раздела «Цены»: {{ prices_total }} {{ prices_total|ru_plural:"период,периода,периодов" }} на год вперёд{% if not account.push_prices %} · сейчас не отправляются{% endif %}</span></figcaption>
+    <table class="list small">
+      <tr><th>С</th><th>По</th><th class="num">Цена ночи</th><th class="num">Мин. ночей</th></tr>
+      {% for p in prices %}<tr><td>{{ p.date_from|iso_date }}</td><td>{{ p.date_to|iso_date }}</td><td class="num">{{ p.night_price|rub }} ₽</td><td class="num">{{ p.minimal_duration }}</td></tr>{% endfor %}
+    </table>
+    {% if prices_total > prices|length %}<p class="muted small">…и ещё {{ prices_total|add:"-12" }}. Изменить — в разделе <a href="{% url 'prices' %}">«Цены»</a>.</p>{% endif %}
+  </figure>
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Брони с Авито</h2>
+  {% if upcoming %}
+  <ul class="blist">
+    {% for b in upcoming %}
+    <li>
+      <span class="dot" style="--c: {{ b.color }}"></span>
+      <a href="{% url 'booking_edit' b.pk %}" class="dates">{{ b.check_in|date:"d.m" }} – {{ b.check_out|date:"d.m.Y" }}</a>
+      <a href="{% url 'booking_edit' b.pk %}">{% if b.is_request %}<span class="status status-request">Ждёт оплаты</span> {% elif b.is_cancelled %}<span class="status status-cancelled">Отмена</span> {% endif %}{{ b.title }}
+        <span class="muted small">· №{{ b.avito_booking_id }}{% if b.total_price is not None %} · {{ b.total_price|rub }} ₽{% endif %}{% if b.paid %} · оплачено {{ b.paid|rub }} ₽{% endif %}</span></a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">Пока нет — появятся после синхронизации.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

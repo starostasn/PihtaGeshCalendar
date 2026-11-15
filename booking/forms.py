@@ -57,8 +57,8 @@ class BookingForm(forms.ModelForm):
         if self.instance.pk:
             del self.fields["initial_payment"]
             del self.fields["initial_payment_method"]
-            if self.instance.is_imported:
-                # Даты, статус и источник импортированной брони задаёт площадка.
+            if self.instance.is_synced:
+                # Даты, статус и источник брони с площадки (iCal или API Авито) задаёт площадка.
                 for name in ("check_in", "check_out", "channel", "kind", "status"):
                     self.fields[name].disabled = True
 

@@ -164,6 +164,12 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 SYNC_INTERVAL_SECONDS = int(os.environ.get("SYNC_INTERVAL_SECONDS", "600"))
 SYNC_HTTP_TIMEOUT = int(os.environ.get("SYNC_HTTP_TIMEOUT", "20"))
 
+# API Авито: ключи приложения с developers.avito.ru. Хранятся только в .env сервера.
+AVITO_CLIENT_ID = os.environ.get("AVITO_CLIENT_ID", "").strip()
+AVITO_CLIENT_SECRET = os.environ.get("AVITO_CLIENT_SECRET", "").strip()
+# Как часто проверять, не изменилась ли занятость или цены, чтобы сразу отправить их на Авито
+AVITO_PUSH_CHECK_SECONDS = int(os.environ.get("AVITO_PUSH_CHECK_SECONDS", "30"))
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

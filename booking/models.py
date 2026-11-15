@@ -325,6 +325,14 @@ class Booking(models.Model):
     import_batch = models.ForeignKey(
         ImportBatch, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="bookings"
     )
+    # Бронь из API Авито: номер, статус и последние данные (гость, суммы) как их отдал Авито
+    avito_booking_id = models.BigIntegerField("Номер брони на Авито", null=True, blank=True, unique=True, editable=False)
+    avito_status = models.CharField(max_length=20, blank=True, editable=False)
+    avito_data = models.JSONField(default=dict, blank=True, editable=False)
+    commission_amount = models.PositiveIntegerField(
+        "Комиссия площадки, ₽", null=True, blank=True, editable=False,
+        help_text="Фактическая комиссия (приходит из API Авито). Если пусто — считается по проценту площадки.",
+    )
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -364,6 +372,15 @@ class Booking(models.Model):
     @property
     def is_imported(self) -> bool:
         return bool(self.external_uid)
+
+    @property
+    def is_from_avito_api(self) -> bool:
+        return self.avito_booking_id is not None
+
+    @property
+    def is_synced(self) -> bool:
+        """Даты и статус задаёт площадка (iCal или API Авито)."""
+        return self.is_imported or self.is_from_avito_api
 
     @property
     def source_name(self) -> str:
@@ -425,6 +442,8 @@ class Booking(models.Model):
 
     @property
     def commission(self) -> int:
+        if self.commission_amount is not None:
+            return self.commission_amount
         if not self.total_price or not self.channel:
             return 0
         return round(self.total_price * float(self.channel.commission_percent) / 100)
@@ -500,6 +519,8 @@ class Payment(models.Model):
     import_batch = models.ForeignKey(
         ImportBatch, null=True, blank=True, editable=False, on_delete=models.SET_NULL, related_name="payments"
     )
+    # Платёж, пришедший с площадки (например, «avito:123:prepay») — чтобы не задвоить при повторной загрузке
+    external_id = models.CharField(max_length=100, blank=True, db_index=True, editable=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="Внёс",
@@ -596,3 +617,70 @@ class HousePhoto(models.Model):
 
     def __str__(self):
         return self.caption or f"Фото {self.pk}"
+
+
+class AvitoAccount(models.Model):
+    """Подключение к API Авито (одна запись). Ключи приложения — в .env сервера, здесь только токены доступа."""
+
+    class Mode(models.TextChoices):
+        OAUTH = "oauth", "Вход через Авито"
+        CLIENT = "client", "Ключи приложения"
+
+    mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.OAUTH)
+    channel = models.ForeignKey(
+        Channel, verbose_name="Площадка в календаре", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+", help_text="Брони из Авито записываются с этим источником",
+    )
+    user_id = models.BigIntegerField("Номер пользователя Авито", null=True, blank=True)
+    user_name = models.CharField(max_length=200, blank=True)
+    item_id = models.BigIntegerField("Номер объявления", null=True, blank=True)
+    access_token_enc = models.TextField(blank=True)
+    refresh_token_enc = models.TextField(blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    scope = models.CharField(max_length=500, blank=True)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    connected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    sync_bookings = models.BooleanField("Загружать брони с Авито", default=True)
+    push_calendar = models.BooleanField(
+        "Закрывать на Авито даты других броней", default=True,
+        help_text="Прямые брони и брони с других площадок сразу закрывают даты на Авито",
+    )
+    push_prices = models.BooleanField(
+        "Отправлять цены и минимальный срок на Авито", default=False,
+        help_text="Цены из раздела «Цены» на год вперёд. Включайте, когда цены здесь настроены.",
+    )
+
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    last_sync_ok = models.BooleanField(null=True, blank=True)
+    last_sync_message = models.TextField(blank=True)
+    calendar_hash = models.CharField(max_length=64, blank=True)
+    calendar_pushed_at = models.DateTimeField(null=True, blank=True)
+    calendar_message = models.TextField(blank=True)
+    prices_hash = models.CharField(max_length=64, blank=True)
+    prices_pushed_at = models.DateTimeField(null=True, blank=True)
+    prices_message = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Подключение к Авито"
+        verbose_name_plural = "Подключение к Авито"
+
+    def __str__(self):
+        return f"Авито: {self.user_name or self.user_id or 'не подключено'}"
+
+    @classmethod
+    def get(cls) -> "AvitoAccount":
+        account = cls.objects.order_by("pk").first()
+        if account is None:
+            account = cls.objects.create()
+        return account
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self.access_token_enc or self.refresh_token_enc)
+
+    @property
+    def is_ready(self) -> bool:
+        return self.is_connected and bool(self.user_id and self.item_id)

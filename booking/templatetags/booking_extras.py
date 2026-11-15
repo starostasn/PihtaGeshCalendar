@@ -72,3 +72,14 @@ def amenity_icon(text):
 def pair_with(first, second):
     """Для перебора двух объектов в шаблоне: {% for x in a|pair_with:b %}."""
     return [first, second]
+
+
+@register.filter
+def iso_date(value):
+    """'2026-12-02' → '02.12.2026'."""
+    from datetime import date
+
+    try:
+        return date.fromisoformat(str(value)).strftime("%d.%m.%Y")
+    except ValueError:
+        return value

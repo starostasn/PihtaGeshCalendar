@@ -1440,3 +1440,358 @@ class StatsComparisonTests(TestCase):
         self.assertContains(resp, "Сравнение лет и сезонов")
         self.assertContains(resp, 'id="compare-data"')
         self.assertNotContains(resp, "сравнение: ")
+
+
+# ---------------------------------------------------------------- API Авито (имитация)
+
+import json as _json  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from .avito import (  # noqa: E402
+    AvitoClient,
+    apply_bookings,
+    calendar_intervals,
+    decrypt,
+    encrypt,
+    price_ranges,
+    push_changes,
+    sync_avito,
+)
+from .models import AvitoAccount  # noqa: E402
+
+AVITO_KEYS = {"AVITO_CLIENT_ID": "test-client", "AVITO_CLIENT_SECRET": "test-secret"}
+
+
+class FakeResp:
+    def __init__(self, status, data):
+        self.status_code = status
+        self._data = data
+        self.text = _json.dumps(data, ensure_ascii=False)
+
+    def json(self):
+        return self._data
+
+
+class FakeAvito:
+    """Имитация API Авито: токены, аккаунт, брони, занятость и цены."""
+
+    def __init__(self):
+        self.calls = []
+        self.bookings = []
+        self.tokens = 0
+        self.token_error = None
+        self.expired = set()
+        self.calendar = None
+        self.calendar_status = 200
+        self.prices = None
+
+    def request(self, method, url, data=None, json=None, params=None, headers=None, timeout=None):
+        path = url.replace("https://api.avito.ru", "")
+        self.calls.append({"method": method, "path": path, "data": data, "json": json, "params": params})
+        if path == "/token":
+            if self.token_error:
+                return FakeResp(400, {"error": "invalid_grant", "error_description": self.token_error})
+            self.tokens += 1
+            return FakeResp(200, {"access_token": f"tok{self.tokens}", "refresh_token": f"ref{self.tokens}",
+                                  "expires_in": 86400, "token_type": "Bearer"})
+        if headers["Authorization"].split()[-1] in self.expired:
+            return FakeResp(401, {"error": {"code": 401, "message": "token expired"}})
+        if path == "/core/v1/accounts/self":
+            return FakeResp(200, {"id": 777, "name": "Сергей"})
+        if path == "/core/v1/items":
+            return FakeResp(200, {"resources": [{"id": 3753751223, "title": "2-к. дом 80 м²"}]})
+        if path == "/realty/v1/accounts/777/items/3753751223/bookings":
+            return FakeResp(200, {"bookings": self.bookings})
+        if path == "/core/v1/accounts/777/items/3753751223/bookings":
+            self.calendar = json
+            if self.calendar_status == 409:
+                return FakeResp(409, {"error": {"code": 409, "message": "overbooking", "conflicts": [
+                    {"interval": {"date_start": "2026-12-01", "date_end": "2026-12-03"}, "bookings": []}]}})
+            return FakeResp(200, {"result": "success"})
+        if path == "/realty/v1/accounts/777/items/3753751223/prices":
+            self.prices = json
+            return FakeResp(200, {"result": "success"})
+        return FakeResp(404, {"error": {"code": 404, "message": "not found"}})
+
+    def token_calls(self):
+        return [c["data"] for c in self.calls if c["path"] == "/token"]
+
+
+def avito_booking(aid, a, b, status="active", phone="9001234567", name="Иван", price=40000, prepay=12000, tax=1200, guests=4):
+    return {
+        "avito_booking_id": aid, "check_in": d(a).isoformat(), "check_out": d(b).isoformat(), "status": status,
+        "nights": b - a, "guest_count": guests, "base_price": price,
+        "contact": {"name": name, "phone": phone, "email": f"{aid}@example.com"},
+        "safe_deposit": {"total_amount": prepay, "owner_amount": prepay - tax, "tax": tax},
+    }
+
+
+def connected_account(channel=None) -> AvitoAccount:
+    account = AvitoAccount.get()
+    account.user_id, account.item_id, account.user_name = 777, 3753751223, "Сергей"
+    account.access_token_enc, account.refresh_token_enc = encrypt("tok0"), encrypt("ref0")
+    account.token_expires_at = timezone.now() + timedelta(hours=20)
+    account.channel = channel
+    account.save()
+    return account
+
+
+@override_settings(**AVITO_KEYS)
+class AvitoAuthTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(self.admin)
+        house = House.get()
+        house.avito_url = "https://www.avito.ru/sheregesh/doma_dachi_kottedzhi/2-k._dom_80m_3753751223"
+        house.save()
+        self.fake = FakeAvito()
+
+    def test_oauth_connect_flow(self):
+        resp = self.client.get(reverse("avito_connect"))
+        self.assertEqual(resp.status_code, 302)
+        url = resp["Location"]
+        self.assertTrue(url.startswith("https://avito.ru/oauth?response_type=code&client_id=test-client"))
+        self.assertIn("scope=short_term_rent:read,short_term_rent:write,user:read,items:info", url)
+        state = self.client.session["avito_oauth_state"]
+        self.assertIn(f"state={state}", url)
+
+        with mock.patch("booking.avito.requests.Session", return_value=self.fake):
+            resp = self.client.get(reverse("avito_callback"), {"code": "abc", "state": state}, follow=True)
+        self.assertContains(resp, "Авито подключено")
+        self.assertEqual(self.fake.token_calls()[0], {"grant_type": "authorization_code", "code": "abc",
+                                                      "client_id": "test-client", "client_secret": "test-secret"})
+        acc = AvitoAccount.get()
+        self.assertEqual((acc.user_id, acc.user_name, acc.item_id, acc.mode), (777, "Сергей", 3753751223, "oauth"))
+        self.assertNotIn("tok1", acc.access_token_enc)  # токены в базе зашифрованы
+        self.assertEqual((decrypt(acc.access_token_enc), decrypt(acc.refresh_token_enc)), ("tok1", "ref1"))
+        self.assertEqual(acc.channel.name, "Авито")
+
+    def test_callback_rejects_wrong_or_missing_state(self):
+        resp = self.client.get(reverse("avito_callback"), {"code": "abc", "state": "x"}, follow=True)
+        self.assertContains(resp, "устарела или неверна")
+        self.client.get(reverse("avito_connect"))
+        resp = self.client.get(reverse("avito_callback"), {"code": "abc", "state": "wrong"}, follow=True)
+        self.assertContains(resp, "устарела или неверна")
+        self.assertFalse(AvitoAccount.get().is_connected)
+        resp = self.client.get(reverse("avito_callback"), {"error": "access_denied"}, follow=True)
+        self.assertContains(resp, "не дал доступ")
+
+    def test_refresh_and_retry(self):
+        acc = connected_account()
+        acc.token_expires_at = timezone.now() - timedelta(minutes=1)
+        acc.save()
+        client = AvitoClient(acc, self.fake)
+        self.assertEqual(client.me()["id"], 777)
+        self.assertEqual(self.fake.token_calls()[0]["grant_type"], "refresh_token")
+        self.assertEqual(self.fake.token_calls()[0]["refresh_token"], "ref0")
+        acc.refresh_from_db()
+        self.assertEqual(decrypt(acc.refresh_token_enc), "ref1")  # новый токен обновления сохранён
+        # Токен отозван раньше срока — обновляем и повторяем запрос
+        self.fake.expired.add("tok1")
+        self.assertEqual(AvitoClient(acc, self.fake).me()["id"], 777)
+        self.assertEqual(len(self.fake.token_calls()), 2)
+
+    def test_client_credentials_and_errors(self):
+        with mock.patch("booking.avito.requests.Session", return_value=self.fake):
+            self.client.post(reverse("avito_connect_client"))
+        acc = AvitoAccount.get()
+        self.assertEqual((acc.mode, acc.user_id), ("client", 777))
+        self.assertEqual(self.fake.token_calls()[0]["grant_type"], "client_credentials")
+        self.fake.token_error = "no access"
+        acc.token_expires_at = timezone.now()
+        acc.save()
+        from .avito import AvitoAuthError
+
+        with self.assertRaises(AvitoAuthError):
+            AvitoClient(acc, self.fake).me()
+
+    def test_secret_key_change_requires_reconnect(self):
+        token = encrypt("tok")
+        with override_settings(SECRET_KEY="another-secret-key-" * 3):
+            self.assertEqual(decrypt(token), "")
+
+    def test_pages_and_permissions(self):
+        with override_settings(AVITO_CLIENT_ID="", AVITO_CLIENT_SECRET=""):
+            resp = self.client.get(reverse("avito"))
+            self.assertContains(resp, "AVITO_CLIENT_ID")
+            self.assertContains(resp, "/avito/callback/")
+        resp = self.client.get(reverse("avito"))
+        self.assertContains(resp, "Подключить Авито")
+        self.assertContains(self.client.get(reverse("channels")), "Авито · API")
+        self.client.force_login(User.objects.create_user("m", password="very-secret-pass"))
+        self.assertEqual(self.client.get(reverse("avito")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("avito_connect")).status_code, 403)
+
+
+@override_settings(**AVITO_KEYS)
+class AvitoBookingsTests(TestCase):
+    def setUp(self):
+        self.avito = Channel.objects.create(name="Авито", import_url="https://example.com/a.ics")
+        self.account = connected_account(self.avito)
+        self.fake = FakeAvito()
+
+    def test_new_booking_with_guest_money_and_commission(self):
+        r = apply_bookings(self.account, [avito_booking(1001, 10, 14)])
+        b = Booking.objects.get(avito_booking_id=1001)
+        self.assertEqual([e.kind for e in r.events], ["created"])
+        self.assertEqual((b.channel, b.status, b.guests, b.total_price, b.commission_amount), (self.avito, "confirmed", 4, 40000, 1200))
+        self.assertEqual((b.guest.name, b.guest.phone, b.guest.email), ("Иван", "+79001234567", "1001@example.com"))
+        self.assertEqual(b.paid, 12000)
+        self.assertEqual(b.payments.get().method, Payment.Method.PLATFORM)
+        self.assertEqual(b.commission, 1200)  # фактическая комиссия вместо процента
+        # Повторная загрузка ничего не задваивает
+        r = apply_bookings(self.account, [avito_booking(1001, 10, 14)])
+        self.assertEqual(r.events, [])
+        self.assertEqual((Booking.objects.count(), Payment.objects.count(), Guest.objects.count()), (1, 1, 1))
+
+    def test_enriches_existing_ical_and_imported_bookings(self):
+        ical = Booking.objects.create(check_in=d(10), check_out=d(14), channel=self.avito, external_uid="u1")
+        rc_avito = Channel.objects.create(name="Авито ")  # канал из загрузки RealtyCalendar
+        excel = Booking.objects.create(check_in=d(20), check_out=d(22), channel=rc_avito, guest=G("Мария", "+79005556677"),
+                                       total_price=30000)
+        Payment.objects.create(booking=excel, amount=9000, method=Payment.Method.PLATFORM)
+        direct = Booking.objects.create(check_in=d(30), check_out=d(33), guest=G("Свой"))
+        r = apply_bookings(self.account, [
+            avito_booking(1, 10, 14), avito_booking(2, 20, 22, price=31000, prepay=9000), avito_booking(3, 30, 33),
+        ])
+        self.assertEqual([e.kind for e in r.events], ["attached", "attached", "created"])
+        ical.refresh_from_db()
+        excel.refresh_from_db()
+        self.assertEqual((ical.avito_booking_id, ical.external_uid, ical.guest.name, ical.total_price), (1, "u1", "Иван", 40000))
+        self.assertEqual((excel.avito_booking_id, excel.guest.name, excel.total_price), (2, "Мария", 30000))  # своё не затираем
+        self.assertEqual(excel.payments.count(), 1)  # предоплата, внесённая вручную, не задвоилась
+        self.assertEqual(excel.payments.get().external_id, "avito:2:prepay")
+        direct.refresh_from_db()
+        self.assertIsNone(direct.avito_booking_id)  # прямую бронь не трогаем — это двойная бронь
+        self.assertEqual(len(conflict_pairs()), 1)
+
+    def test_pending_paid_cancelled_and_expired(self):
+        apply_bookings(self.account, [avito_booking(5, 10, 12, status="pending"), avito_booking(6, 20, 22, status="pending")])
+        b5, b6 = Booking.objects.get(avito_booking_id=5), Booking.objects.get(avito_booking_id=6)
+        self.assertEqual((b5.status, b5.paid), ("request", 0))  # ждёт оплаты — заявка, без предоплаты
+        r = apply_bookings(self.account, [avito_booking(5, 10, 12)])  # оплачена; №6 пропала
+        b5.refresh_from_db()
+        b6.refresh_from_db()
+        self.assertEqual((b5.status, b5.paid), ("confirmed", 12000))
+        self.assertEqual(b6.status, "cancelled")
+        self.assertEqual(sorted(e.kind for e in r.events), ["cancelled", "paid"])
+        apply_bookings(self.account, [avito_booking(5, 10, 12, status="canceled")])
+        b5.refresh_from_db()
+        self.assertEqual((b5.status, b5.cancel_reason), ("cancelled", "Отменена на Авито"))
+        # iCal не возвращает отменённую в API бронь, даже если событие ещё висит в календаре площадки
+        b5.external_uid = "ev5"
+        b5.save()
+        apply_feed(self.avito, [FeedEvent("ev5", d(10), d(12))])
+        b5.refresh_from_db()
+        self.assertEqual(b5.status, "cancelled")
+
+    def test_api_values_follow_but_manual_edits_win(self):
+        apply_bookings(self.account, [avito_booking(7, 10, 12, price=20000)])
+        apply_bookings(self.account, [avito_booking(7, 10, 13, price=26000, guests=5)])
+        b = Booking.objects.get(avito_booking_id=7)
+        self.assertEqual((b.check_out, b.total_price, b.guests), (d(13), 26000, 5))
+        b.total_price = 25000  # скидку дали вручную
+        b.save()
+        apply_bookings(self.account, [avito_booking(7, 10, 13, price=27000, guests=5)])
+        b.refresh_from_db()
+        self.assertEqual(b.total_price, 25000)
+
+    def test_calendar_intervals_and_push(self):
+        Booking.objects.create(check_in=d(-2), check_out=d(3), guest=G("Прямой"))  # уже живут — с сегодняшнего дня
+        Booking.objects.create(check_in=d(2), check_out=d(5), channel=Channel.objects.create(name="Суточно"))
+        Booking.objects.create(kind=Booking.Kind.BLOCK, check_in=d(10), check_out=d(12))
+        Booking.objects.create(check_in=d(20), check_out=d(22), status=Booking.Status.REQUEST)  # заявки не отправляем
+        Booking.objects.create(check_in=d(30), check_out=d(32), channel=self.avito, external_uid="u")  # бронь Авито
+        apply_bookings(self.account, [avito_booking(9, 40, 42)])
+        self.assertEqual(calendar_intervals(self.account), [
+            {"date_start": d(0).isoformat(), "date_end": d(5).isoformat(), "type": "booking"},
+            {"date_start": d(10).isoformat(), "date_end": d(12).isoformat(), "type": "manual"},
+        ])
+        client = AvitoClient(self.account, self.fake)
+        self.assertEqual(len(push_changes(self.account, client)), 1)
+        self.assertEqual(self.fake.calendar["source"], "PihtaGeshCalendar")
+        self.assertEqual(len(self.fake.calendar["bookings"]), 2)
+        self.avito.refresh_from_db()
+        self.assertIsNotNone(self.avito.last_exported_at)
+        self.assertEqual(push_changes(self.account, client), [])  # без изменений — не отправляем
+        save_booking(Booking(check_in=d(50), check_out=d(52), guest=G("Новый")))
+        self.assertEqual(len(push_changes(self.account, client)), 1)
+        self.assertEqual(len(self.fake.calendar["bookings"]), 3)
+        # Пересечение с оплаченной бронью Авито — не ошибка, а предупреждение
+        self.fake.calendar_status = 409
+        save_booking(Booking(check_in=d(60), check_out=d(62)))
+        push_changes(self.account, client)
+        self.account.refresh_from_db()
+        self.assertIn("Часть дат не закрыта", self.account.calendar_message)
+
+    def test_price_ranges_and_push(self):
+        house = House.get()
+        house.base_price, house.min_stay = 10000, 2
+        house.save()
+        start = next_weekday(4)  # пятница
+        PriceRule.objects.create(name="Выходные", weekdays="4,5", price=15000, priority=PriceRule.PRIORITY_WEEKDAYS)
+        PriceRule.objects.create(name="Праздник", date_from=start + timedelta(days=7), date_to=start + timedelta(days=7),
+                                 min_stay=45, priority=PriceRule.PRIORITY_DATES)
+        ranges = price_ranges(start, days=10)
+        self.assertEqual(ranges[0], {"date_from": start.isoformat(), "date_to": (start + timedelta(days=1)).isoformat(),
+                                     "night_price": 15000, "minimal_duration": 2})
+        self.assertEqual(ranges[1]["night_price"], 10000)
+        self.assertEqual(ranges[2]["minimal_duration"], 30)  # Авито принимает не больше 30 ночей
+        skipped = price_ranges(start, days=3, skip={start + timedelta(days=1)})
+        self.assertEqual([r["date_from"] for r in skipped], [start.isoformat(), (start + timedelta(days=2)).isoformat()])
+
+        self.account.push_prices = True
+        self.account.save()
+        apply_bookings(self.account, [avito_booking(11, 1, 3, status="pending")])
+        push_changes(self.account, AvitoClient(self.account, self.fake))
+        sent = self.fake.prices["prices"]
+        self.assertEqual(sum((date.fromisoformat(p["date_to"]) - date.fromisoformat(p["date_from"])).days + 1 for p in sent), 363)
+        self.assertFalse(any(p["date_from"] <= d(1).isoformat() <= p["date_to"] for p in sent))  # ночи заявки не трогаем
+
+    def test_sync_notifications_and_failures(self):
+        sent = []
+        self.fake.bookings = [avito_booking(21, 10, 12)]
+        r = sync_avito(http=self.fake, notify=sent.append)
+        self.assertTrue(r.ok)
+        self.assertIn("Авито подключено", sent[-1])
+        self.fake.bookings.append(avito_booking(22, 20, 25, name="Ольга", phone="9007770000"))
+        sync_avito(http=self.fake, notify=sent.append)
+        self.assertIn("🆕 Авито: новая бронь", sent[-1])
+        self.assertIn("Ольга", sent[-1])
+        self.assertIn("предоплата 12 000 ₽", sent[-1])
+        self.assertEqual(self.avito.sync_logs.count(), 2)
+        # Потеря доступа — одно сообщение, потом восстановление
+        acc = AvitoAccount.get()
+        acc.token_expires_at = timezone.now()
+        acc.save()
+        self.fake.token_error = "refresh expired"
+        sync_avito(http=self.fake, notify=sent.append)
+        sync_avito(http=self.fake, notify=sent.append)
+        self.assertIn("подключение потеряно", sent[-1])
+        self.assertEqual(sum("подключение потеряно" in s for s in sent), 1)
+        self.fake.token_error = None
+        sync_avito(http=self.fake, notify=sent.append)
+        self.assertIn("снова работает", sent[-1])
+
+    def test_not_configured_is_noop(self):
+        with override_settings(AVITO_CLIENT_ID=""):
+            self.assertIsNone(sync_avito(http=self.fake))
+        self.assertEqual(self.fake.calls, [])
+
+    def test_export_merge_and_card(self):
+        excel = Booking.objects.create(check_in=d(10), check_out=d(12), comment="Импорт из RealtyCalendar")  # «Напрямую»
+        apply_bookings(self.account, [avito_booking(31, 10, 12)])
+        api_booking = Booking.objects.get(avito_booking_id=31)
+        self.assertNotEqual(api_booking.pk, excel.pk)  # прямую бронь API сам не присваивает
+        self.assertNotIn(f"booking-{api_booking.pk}@", build_export(self.avito).decode())  # Авито свою бронь не получает
+        user = User.objects.create_user("m", password="very-secret-pass")
+        self.client.force_login(user)
+        card = self.client.get(reverse("booking_edit", args=[api_booking.pk]))
+        self.assertContains(card, "Бронь с Авито №31")
+        self.assertContains(card, "комиссия Авито 1 200 ₽")
+        self.assertTrue(card.context["form"].fields["check_in"].disabled)  # даты задаёт Авито
+        # Объединение переносит связь с API Авито в остающуюся бронь
+        result = merge_bookings(excel, api_booking, {"channel": "b"})
+        self.assertEqual(Booking.objects.count(), 1)
+        self.assertEqual((result.pk, result.avito_booking_id, result.commission_amount), (excel.pk, 31, 1200))
+        self.assertEqual((result.guest.name, result.channel, result.paid), ("Иван", self.avito, 12000))

@@ -267,8 +267,19 @@ def merge_bookings(x: Booking, y: Booking, choices: dict[str, str] | None = None
         a.import_batch_id = b.import_batch_id
     if not a.created_by_id and b.created_by_id:
         a.created_by_id = b.created_by_id
+    # Связь с бронью в API Авито (номер, статус, суммы) переходит в итоговую бронь
+    avito_fields = {}
+    if a.avito_booking_id is None and b.avito_booking_id is not None:
+        avito_fields = {
+            "avito_booking_id": b.avito_booking_id, "avito_status": b.avito_status,
+            "avito_data": b.avito_data, "commission_amount": b.commission_amount,
+        }
+    elif a.commission_amount is None and b.commission_amount is not None:
+        avito_fields = {"commission_amount": b.commission_amount}
     b_pk = b.pk
     b.delete()
+    for name, value in avito_fields.items():
+        setattr(a, name, value)
 
     for name, value in result.items():
         setattr(a, name, value)
