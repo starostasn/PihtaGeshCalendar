@@ -68,6 +68,11 @@ def redirect_uri() -> str:
     return settings.PUBLIC_BASE_URL.rstrip("/") + reverse("avito_callback")
 
 
+def site_root() -> str:
+    """Главный адрес сайта — тоже подходит как адрес возврата (код принимает календарь)."""
+    return settings.PUBLIC_BASE_URL.rstrip("/") + "/"
+
+
 def authorize_url(state: str) -> str:
     query = urlencode(
         {"response_type": "code", "client_id": settings.AVITO_CLIENT_ID, "scope": ",".join(SCOPES), "state": state},

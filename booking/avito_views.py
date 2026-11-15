@@ -21,6 +21,7 @@ from .avito import (
     item_id_from_url,
     price_ranges,
     redirect_uri,
+    site_root,
     sync_avito,
 )
 from .models import AvitoAccount, Booking, Channel, House
@@ -89,6 +90,7 @@ def avito_view(request):
             "form": form,
             "configured": credentials_configured(),
             "redirect_uri": redirect_uri(),
+            "site_root": site_root(),
             "intervals": intervals,
             "prices": prices[:12],
             "prices_total": len(prices),

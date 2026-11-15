@@ -16,9 +16,8 @@
   <pre class="code">AVITO_CLIENT_ID=…
 AVITO_CLIENT_SECRET=…</pre>
   <p>Затем перезапустите календарь: <code>docker compose up -d</code>. После этого здесь появится кнопка «Подключить Авито».</p>
-  <p class="small">В настройках приложения на Авито адрес возврата (Redirect URI) должен быть таким:</p>
-  <code class="url" id="redirectUri">{{ redirect_uri }}</code>
-  <button class="btn small" type="button" data-copy="redirectUri">Копировать</button>
+  <p class="small">Адрес возврата (Redirect URI) в настройках приложения на Авито — подойдёт любой из двух:
+    <b>{{ site_root }}</b> или <b>{{ redirect_uri }}</b>.</p>
 </section>
 {% else %}
 <section class="card">
@@ -55,9 +54,8 @@ AVITO_CLIENT_SECRET=…</pre>
   </div>
   <p class="muted small">Второй способ — без входа: работает, если Авито разрешает приложению доступ к собственному аккаунту
     владельца. Если он выдаст ошибку, используйте первую кнопку.</p>
-  <p class="small">Адрес возврата (Redirect URI) в настройках приложения на Авито должен быть таким:
-    <code class="url" id="redirectUri">{{ redirect_uri }}</code>
-    <button class="btn small" type="button" data-copy="redirectUri">Копировать</button></p>
+  <p class="small">Адрес возврата (Redirect URI) в настройках приложения на Авито — подойдёт любой из двух:
+    <b>{{ site_root }}</b> или <b>{{ redirect_uri }}</b>.</p>
   {% endif %}
 </section>
 

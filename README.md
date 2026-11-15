@@ -140,8 +140,8 @@ docker compose exec web python manage.py createsuperuser
 
 Нужно приложение на developers.avito.ru (выдаёт `client_id` и `client_secret`).
 
-1. В настройках приложения на Авито укажите адрес возврата (Redirect URI) — точно такой:
-   `https://ВАШ-ДОМЕН/avito/callback/` (его же показывает страница «Площадки → Авито»).
+1. В настройках приложения на Авито адрес возврата (Redirect URI) — `https://ВАШ-ДОМЕН/`
+   или `https://ВАШ-ДОМЕН/avito/callback/`: календарь принимает возврат на оба адреса.
 2. Впишите ключи в `.env` на сервере (только туда — не в мессенджеры и не в репозиторий):
    ```
    AVITO_CLIENT_ID=...

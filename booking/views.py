@@ -108,6 +108,14 @@ def _build_month(year: int, month: int, bookings: list[Booking], calc: PriceCalc
 
 @login_required
 def calendar_view(request):
+    # Возврат с Авито после «Разрешить», если в приложении Авито адресом возврата указан
+    # просто адрес сайта (https://домен/), а не /avito/callback/.
+    if ("code" in request.GET or "error" in request.GET) and (
+        "avito_oauth_state" in request.session or "state" in request.GET
+    ):
+        from .avito_views import avito_callback
+
+        return avito_callback(request)
     today = timezone.localdate()
     try:
         y, m = (int(x) for x in request.GET.get("m", "").split("-"))

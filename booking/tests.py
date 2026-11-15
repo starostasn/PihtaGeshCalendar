@@ -1566,6 +1566,17 @@ class AvitoAuthTests(TestCase):
         self.assertEqual((decrypt(acc.access_token_enc), decrypt(acc.refresh_token_enc)), ("tok1", "ref1"))
         self.assertEqual(acc.channel.name, "Авито")
 
+    def test_return_to_site_root(self):
+        """В приложении Авито адресом возврата указан просто https://домен/ — код принимает календарь."""
+        self.client.get(reverse("avito_connect"))
+        state = self.client.session["avito_oauth_state"]
+        with mock.patch("booking.avito.requests.Session", return_value=self.fake):
+            resp = self.client.get("/", {"code": "abc", "state": state}, follow=True)
+        self.assertContains(resp, "Авито подключено")
+        self.assertEqual(AvitoAccount.get().user_id, 777)
+        # Обычное открытие календаря не задето
+        self.assertContains(self.client.get("/"), "Календарь")
+
     def test_callback_rejects_wrong_or_missing_state(self):
         resp = self.client.get(reverse("avito_callback"), {"code": "abc", "state": "x"}, follow=True)
         self.assertContains(resp, "устарела или неверна")
