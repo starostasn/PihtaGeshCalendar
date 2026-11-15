@@ -15,10 +15,12 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from .forms import BookingForm, ChannelForm, HouseForm, PaymentForm, PeriodPriceForm, PriceRuleForm
-from .ical import build_export, sync_channel
+from .ical import build_export, preview_channel, sync_channel
 from .guests import guest_choice_payload
 from .models import Booking, Channel, Guest, House, LinkedEvent, Payment, PriceRule, SyncLog
 from .permissions import admin_required, forbidden, is_admin
+from .platforms import PLATFORMS, platform_key
+from .platforms import guide as platform_guide
 from .pricing import PriceCalculator
 from .services import OverlapError, conflict_pairs, find_overlaps, is_possible_echo, save_booking
 from .stats import PRESETS, build_comparison, build_dashboard, resolve_period
@@ -432,7 +434,28 @@ def channels_view(request):
     return render(
         request,
         "booking/channels.html",
-        {"channels": channels, "logs": logs, "local_mode": local_mode, "avito": AvitoAccount.get()},
+        {
+            "channels": channels,
+            "logs": logs,
+            "local_mode": local_mode,
+            "avito": AvitoAccount.get(),
+            "yandex_connected": any(platform_key(c.name) == "yandex" and c.import_url for c in channels),
+        },
+    )
+
+
+def _channel_page(request, form, channel, preview=None):
+    name = form["name"].value() or (channel.name if channel else "")
+    return render(
+        request,
+        "booking/channel_form.html",
+        {
+            "form": form,
+            "channel": channel,
+            "export_url": export_url(channel) if channel else "",
+            "guide": platform_guide(name),
+            "preview": preview,
+        },
     )
 
 
@@ -440,18 +463,46 @@ def channels_view(request):
 def channel_edit(request, pk: int | None = None):
     channel = get_object_or_404(Channel, pk=pk) if pk else None
     if request.method == "POST":
+        old_url = channel.import_url if channel else ""
         form = ChannelForm(request.POST, instance=channel)
         if form.is_valid():
             channel = form.save()
+            if channel.import_url and channel.import_url != old_url:
+                messages.success(request, "Ссылка сохранена. Нажмите «Проверить ссылку» — покажем, что придёт с площадки, ничего не меняя.")
+                return redirect("channel_edit", pk=channel.pk)
             messages.success(request, "Площадка сохранена")
             return redirect("channels")
-    else:
-        form = ChannelForm(instance=channel, initial={} if channel else {"name": "Авито", "color": "#00AAFF"})
-    return render(
-        request,
-        "booking/channel_form.html",
-        {"form": form, "channel": channel, "export_url": export_url(channel) if channel else ""},
-    )
+        return _channel_page(request, form, channel)
+
+    initial = {}
+    key = request.GET.get("platform", "")
+    if channel is None and key in PLATFORMS:
+        # Площадка могла появиться раньше — например, при загрузке броней из RealtyCalendar
+        existing = next((c for c in Channel.objects.all() if platform_key(c.name) == key), None)
+        if existing is not None:
+            messages.info(request, f"Площадка «{existing.name}» уже есть — допишите в неё ссылку на календарь.")
+            return redirect("channel_edit", pk=existing.pk)
+        initial = {"name": PLATFORMS[key]["name"], "color": PLATFORMS[key]["color"]}
+    elif channel is None:
+        initial = {"color": "#8E8E93"}
+    elif channel.color.upper() == "#8E8E93" and platform_key(channel.name):
+        initial = {"color": PLATFORMS[platform_key(channel.name)]["color"]}  # серый цвет из загрузки → фирменный
+    return _channel_page(request, ChannelForm(instance=channel, initial=initial), channel)
+
+
+@admin_required
+@require_POST
+def channel_preview(request, pk: int):
+    channel = get_object_or_404(Channel, pk=pk)
+    form = ChannelForm(instance=channel)
+    if not channel.import_url:
+        messages.error(request, "Сначала вставьте ссылку на календарь площадки и сохраните")
+        return redirect("channel_edit", pk=pk)
+    try:
+        preview = preview_channel(channel)
+    except Exception as exc:  # noqa: BLE001 — показываем любую ошибку площадки как есть
+        preview = {"error": str(exc)[:500] or exc.__class__.__name__}
+    return _channel_page(request, form, channel, preview)
 
 
 @admin_required
@@ -463,10 +514,11 @@ def channel_sync(request, pk: int):
         return redirect("channels")
     result = sync_channel(channel)
     if result.ok:
+        linked = len(result.attached) + len(result.echoed)
         messages.success(
             request,
             f"«{channel.name}»: новых {len(result.created)}, изменено {len(result.updated)}, "
-            f"отменено {len(result.cancelled)}",
+            f"отменено {len(result.cancelled)}" + (f", привязано к уже внесённым {linked}" if linked else ""),
         )
         for w in result.warnings:
             messages.warning(request, w)

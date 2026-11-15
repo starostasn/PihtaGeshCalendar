@@ -1806,3 +1806,77 @@ class AvitoBookingsTests(TestCase):
         self.assertEqual(Booking.objects.count(), 1)
         self.assertEqual((result.pk, result.avito_booking_id, result.commission_amount), (excel.pk, 31, 1200))
         self.assertEqual((result.guest.name, result.channel, result.paid), ("Иван", self.avito, 12000))
+
+
+# ---------------------------------------------------------------- Яндекс Путешествия (iCal)
+
+from .merge import same_platform  # noqa: E402
+from .platforms import platform_key  # noqa: E402
+
+
+class YandexTravelTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", password="very-secret-pass")
+        self.client.force_login(self.admin)
+
+    def test_platform_names(self):
+        self.assertEqual(platform_key("Яндекс Путешествия"), "yandex")
+        self.assertEqual(platform_key("Я.Путешествия"), "yandex")
+        self.assertEqual(platform_key("YandexTravel"), "yandex")
+        self.assertEqual(platform_key("авито "), "avito")
+        self.assertEqual(platform_key("Суточно"), "")
+        ya1, ya2 = Channel.objects.create(name="Яндекс"), Channel.objects.create(name="Яндекс Путешествия")
+        self.assertTrue(same_platform(ya1, ya2))
+        self.assertFalse(same_platform(ya1, Channel.objects.create(name="Авито")))
+
+    def test_create_uses_existing_channel_from_import(self):
+        resp = self.client.get(reverse("channel_create"), {"platform": "yandex"})
+        self.assertContains(resp, "Экстранет")
+        self.assertContains(resp, 'value="Яндекс Путешествия"')
+        imported = Channel.objects.create(name="Яндекс Путешествия", color="#8E8E93")
+        resp = self.client.get(reverse("channel_create"), {"platform": "yandex"})
+        self.assertRedirects(resp, reverse("channel_edit", args=[imported.pk]))
+        page = self.client.get(reverse("channel_edit", args=[imported.pk]))
+        self.assertContains(page, 'value="#C2410C"')  # серый цвет из загрузки предлагаем заменить фирменным
+        self.assertContains(page, "Синхронизация календарей")
+        self.assertContains(self.client.get(reverse("channels")), "+ Яндекс Путешествия")
+
+    def test_save_link_then_preview_changes_nothing(self):
+        ya = Channel.objects.create(name="Яндекс Путешествия", color="#8E8E93")
+        old = Booking.objects.create(check_in=d(10), check_out=d(14), channel=ya, guest=G("Ирина"), total_price=50000)
+        resp = self.client.post(reverse("channel_edit", args=[ya.pk]), {
+            "name": "Яндекс Путешествия", "color": "#C2410C", "import_url": "https://example.com/ya.ics",
+            "commission_percent": "15", "is_active": "on",
+        })
+        self.assertRedirects(resp, reverse("channel_edit", args=[ya.pk]))
+        feed = ics(vevent("ya-1", d(10), d(14)), vevent("ya-2", d(20), d(22)), vevent("ya-old", d(-30), d(-28)))
+        with mock.patch("booking.ical.fetch_feed", return_value=feed):
+            page = self.client.post(reverse("channel_preview", args=[ya.pk]))
+        p = page.context["preview"]
+        self.assertEqual((p["events"], p["future"], len(p["created"]), len(p["attached"])), (3, 2, 1, 1))
+        self.assertIn("Ирина", p["attached"][0])
+        self.assertContains(page, "Привяжутся к уже внесённым")
+        # Проверка ничего не записала
+        old.refresh_from_db()
+        self.assertEqual((Booking.objects.count(), old.external_uid), (1, ""))
+        # Настоящая синхронизация — бронь из загрузки дополняется, а не задваивается
+        with mock.patch("booking.ical.fetch_feed", return_value=feed):
+            self.client.post(reverse("channel_sync", args=[ya.pk]))
+        old.refresh_from_db()
+        self.assertEqual((Booking.objects.count(), old.external_uid, old.total_price), (2, "ya-1", 50000))
+        self.assertEqual(conflict_pairs(), [])
+        self.assertNotContains(self.client.get(reverse("channels")), "+ Яндекс Путешествия")
+
+    def test_preview_error_is_shown(self):
+        ya = Channel.objects.create(name="Яндекс Путешествия", import_url="https://example.com/ya.ics")
+        with mock.patch("booking.ical.fetch_feed", side_effect=ValueError("По ссылке не iCal-календарь")):
+            page = self.client.post(reverse("channel_preview", args=[ya.pk]))
+        self.assertContains(page, "Не удалось забрать календарь")
+
+    def test_alias_names_attach(self):
+        short = Channel.objects.create(name="Яндекс", import_url="https://example.com/ya.ics")
+        full = Channel.objects.create(name="Яндекс Путешествия")
+        b = Booking.objects.create(check_in=d(5), check_out=d(7), channel=full)
+        r = apply_feed(short, [FeedEvent("u", d(5), d(7))])
+        b.refresh_from_db()
+        self.assertEqual((r.created, b.external_uid), ([], "u"))

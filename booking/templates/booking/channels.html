@@ -3,7 +3,8 @@
 {% block content %}
 <div class="cal-head">
   <h1>Площадки</h1>
-  <a class="btn small primary" href="{% url 'channel_create' %}">+ Площадка</a>
+  {% if not yandex_connected %}<a class="btn small primary" href="{% url 'channel_create' %}?platform=yandex">+ Яндекс Путешествия</a>{% endif %}
+  <a class="btn small{% if yandex_connected %} primary{% endif %}" href="{% url 'channel_create' %}">+ Площадка</a>
 </div>
 <p class="muted small">Синхронизация по iCal: каждые несколько минут мы забираем занятые даты с площадки, а площадка забирает наш календарь.
   Передаются только даты — без цен и данных гостя.</p>

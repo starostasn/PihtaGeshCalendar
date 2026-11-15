@@ -22,17 +22,22 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .models import Booking, Channel, LinkedEvent
+from .platforms import platform_key
 from .services import conflict_pairs
 
 SIDES = ("a", "b")
 
 
 def same_platform(x: Channel | None, y: Channel | None) -> bool:
-    """Одна и та же площадка: тот же канал или канал с тем же названием
-    (например, «Авито», созданный при загрузке из RealtyCalendar, и «Авито» с iCal)."""
+    """Одна и та же площадка: тот же канал, канал с тем же названием (например, «Авито», созданный
+    при загрузке из RealtyCalendar, и «Авито» с iCal) или известная площадка под разными названиями
+    («Яндекс» и «Яндекс Путешествия»)."""
     if x is None or y is None:
         return False
-    return x.pk == y.pk or x.name.strip().lower() == y.name.strip().lower()
+    if x.pk == y.pk or x.name.strip().lower() == y.name.strip().lower():
+        return True
+    key = platform_key(x.name)
+    return bool(key) and key == platform_key(y.name)
 
 
 def order_pair(x: Booking, y: Booking) -> tuple[Booking, Booking]:

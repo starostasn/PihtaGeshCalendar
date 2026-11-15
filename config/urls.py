@@ -42,6 +42,7 @@ urlpatterns = [
     path("channels/new/", views.channel_edit, name="channel_create"),
     path("channels/<int:pk>/", views.channel_edit, name="channel_edit"),
     path("channels/<int:pk>/sync/", views.channel_sync, name="channel_sync"),
+    path("channels/<int:pk>/preview/", views.channel_preview, name="channel_preview"),
     path("channels/<int:pk>/new-token/", views.channel_new_token, name="channel_new_token"),
     path("channels/avito/", avito_views.avito_view, name="avito"),
     path("channels/avito/connect/", avito_views.avito_connect, name="avito_connect"),

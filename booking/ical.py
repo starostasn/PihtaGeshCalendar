@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from .models import Booking, Channel, LinkedEvent, SyncLog
 from .notify import send_telegram
+from .merge import same_platform
 from .services import conflict_pairs, is_possible_echo
 
 log = logging.getLogger(__name__)
@@ -148,10 +149,6 @@ def _label(b: Booking) -> str:
     return f"{b.source_name}{' (заявка)' if b.is_request else ''} {_fmt(b)}"
 
 
-def _same_platform(x: Channel | None, y: Channel) -> bool:
-    return x is not None and (x.pk == y.pk or x.name.strip().lower() == y.name.strip().lower())
-
-
 def _twin_action(channel: Channel, twin: Booking) -> str:
     """Что делать с новой бронью площадки, если у нас уже есть бронь ровно на эти даты.
 
@@ -159,7 +156,7 @@ def _twin_action(channel: Channel, twin: Booking) -> str:
     echo — площадка показывает нашу же бронь, которую получила из нашего календаря:
            бронь подтверждена и создана до того, как площадка последний раз забрала наш календарь.
     """
-    if _same_platform(twin.channel, channel):
+    if same_platform(twin.channel, channel):
         return "attach"
     if (
         twin.status == Booking.Status.CONFIRMED
@@ -314,11 +311,37 @@ def _conflict_warnings(touched: list[Booking]) -> list[str]:
     return lines
 
 
-def sync_channel(channel: Channel, fetch=fetch_feed, notify=send_telegram) -> SyncResult:
+def preview_channel(channel: Channel, fetch=None) -> dict:
+    """Что сделает синхронизация с площадкой — без изменений в базе (всё откатывается)."""
+    events = parse_feed((fetch or fetch_feed)(channel.import_url))
+    today = timezone.localdate()
+
+    def describe(b: Booking) -> str:
+        who = b.guest.name if b.guest_id else (b.comment.splitlines()[0][:40] if b.comment else "")
+        return _fmt(b) + (f" — {who}" if who else "")
+
+    with transaction.atomic():
+        result = apply_feed(channel, events)
+        report = {
+            "events": len(events),
+            "future": sum(1 for e in events if e.end > today),
+            "created": [describe(b) for b in result.created],
+            "attached": [describe(b) for b in result.attached],
+            "echoed": [describe(b) for b in result.echoed],
+            "updated": [describe(b) for b in result.updated],
+            "cancelled": [describe(b) for b in result.cancelled],
+            "warnings": list(result.warnings),
+            "conflicts": [line.replace("⚠️ ", "") for line in _conflict_warnings(result.touched)],
+        }
+        transaction.set_rollback(True)
+    return report
+
+
+def sync_channel(channel: Channel, fetch=None, notify=send_telegram) -> SyncResult:
     """Забирает календарь площадки, применяет изменения, пишет журнал и шлёт уведомления."""
     was_ok = channel.last_sync_ok
     try:
-        events = parse_feed(fetch(channel.import_url))
+        events = parse_feed((fetch or fetch_feed)(channel.import_url))
         result = apply_feed(channel, events)
     except Exception as exc:  # noqa: BLE001 — любой сбой площадки фиксируем, а не падаем
         log.warning("Синхронизация %s не удалась: %s", channel, exc, exc_info=settings.DEBUG)
