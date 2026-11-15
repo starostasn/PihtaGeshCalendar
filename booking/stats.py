@@ -27,8 +27,13 @@ PRESETS = [
     ("last_12", "12 месяцев"),
     ("this_year", "Этот год"),
     ("last_year", "Прошлый год"),
+    ("all", "За всё время"),
     ("custom", "Свой период"),
 ]
+
+# С этой даты в календаре есть история броней (загружена из RealtyCalendar).
+STATS_START = date(2023, 1, 1)
+WINTER_MONTHS = (11, 12, 1, 2, 3, 4)  # горнолыжный сезон в Шерегеше
 
 STAY_BUCKETS = [(1, 1, "1 ночь"), (2, 2, "2"), (3, 3, "3"), (4, 6, "4–6"), (7, 13, "7–13"), (14, 10**6, "14+")]
 LEAD_BUCKETS = [
@@ -59,8 +64,10 @@ class Period:
     def last_day(self) -> date:
         return self.end - timedelta(days=1)
 
-    def previous(self) -> "Period":
-        """Предыдущий период такой же длины (для сравнения)."""
+    def previous(self) -> "Period | None":
+        """Предыдущий период такой же длины (для сравнения). За всё время сравнивать не с чем."""
+        if self.preset == "all":
+            return None
         if self.preset in ("this_year", "last_year"):
             start = self.start.replace(year=self.start.year - 1)
             return Period(start, self.start, "prev", "прошлый год")
@@ -97,6 +104,9 @@ def resolve_period(preset: str, date_from: date | None, date_to: date | None, to
         return Period(date(today.year, 1, 1), date(today.year + 1, 1, 1), preset, f"{today.year} год")
     if preset == "last_year":
         return Period(date(today.year - 1, 1, 1), date(today.year, 1, 1), preset, f"{today.year - 1} год")
+    if preset == "all":
+        start = min(STATS_START, today)
+        return Period(start, today + timedelta(days=1), preset, f"За всё время: {start:%d.%m.%Y} – {today:%d.%m.%Y}")
     start = _month_start(today)
     return Period(start, _add_months(start, 1), "this_month", f"{MONTHS_SHORT[start.month].capitalize()} {start.year}")
 
@@ -217,7 +227,7 @@ def _buckets(period: Period) -> tuple[str, list[tuple[date, date, str]]]:
 @dataclass
 class Dashboard:
     period: Period
-    prev: Period
+    prev: Period | None
     kpi: dict = field(default_factory=dict)
     granularity: str = "month"
     series: list[dict] = field(default_factory=list)
@@ -244,9 +254,12 @@ class Dashboard:
 def build_dashboard(period: Period, today: date) -> Dashboard:
     bookings = _load(period.start, period.end)
     prev = period.previous()
-    prev_bookings = _load(prev.start, prev.end)
     core = _core(bookings, period.start, period.end)
-    pcore = _core(prev_bookings, prev.start, prev.end)
+    prev_bookings = _load(prev.start, prev.end) if prev else []
+    pcore = _core(prev_bookings, prev.start, prev.end) if prev else None
+
+    def change(attr: str, kind: str = "pct") -> dict | None:
+        return _delta(getattr(core, attr), getattr(pcore, attr), kind) if pcore else None
 
     dash = Dashboard(period=period, prev=prev)
 
@@ -271,16 +284,16 @@ def build_dashboard(period: Period, today: date) -> Dashboard:
 
     dash.kpi = {
         "revenue": round(core.revenue),
-        "revenue_delta": _delta(core.revenue, pcore.revenue),
+        "revenue_delta": change("revenue"),
         "net": round(core.revenue - core.commission),
         "commission": round(core.commission),
         "occupancy": core.occupancy,
-        "occupancy_delta": _delta(core.occupancy, pcore.occupancy, "pp"),
+        "occupancy_delta": change("occupancy", "pp"),
         "occupied": core.occupied,
         "available": core.available,
         "blocked": core.blocked,
         "adr": core.adr,
-        "adr_delta": _delta(core.adr, pcore.adr),
+        "adr_delta": change("adr"),
         "revpar": core.revpar,
         "arrivals": core.arrivals,
         "arrivals_delta": _delta(core.arrivals, len(prev_arrivals)) if prev_arrivals else None,
@@ -368,3 +381,103 @@ def build_dashboard(period: Period, today: date) -> Dashboard:
     dash.stay = distribution(stays, STAY_BUCKETS)
     dash.lead = distribution(leads, LEAD_BUCKETS)
     return dash
+
+
+# ---------------------------------------------------------------- сравнение лет и сезонов
+
+MONTHS_FULL = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август",
+               "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+MAX_COMPARED = 8  # больше линий на одном графике уже не различить
+
+
+def _shift_years(d: date, years: int) -> date:
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:  # 29 февраля
+        return d.replace(year=d.year + years, day=28)
+
+
+def _totals(bookings: list[Booking], start: date, end: date) -> dict:
+    c = _core(bookings, start, end)
+    return {
+        "revenue": round(c.revenue),
+        "occupied": c.occupied,
+        "available": c.available,
+        "occupancy": round(c.occupancy, 1) if c.occupancy is not None else None,
+        "adr": round(c.adr) if c.adr is not None else None,
+        "arrivals": c.arrivals,
+    }
+
+
+def _season_key(d: date) -> int:
+    """Сезон 2025/26 — с 1 ноября 2025 по 31 октября 2026: зима (ноябрь–апрель), потом лето."""
+    return d.year if d.month >= 11 else d.year - 1
+
+
+def _bounds(mode: str, key: int) -> tuple[date, date, str]:
+    if mode == "year":
+        return date(key, 1, 1), date(key + 1, 1, 1), str(key)
+    return date(key, 11, 1), date(key + 1, 11, 1), f"{key}/{(key + 1) % 100:02d}"
+
+
+def build_comparison(today: date) -> dict:
+    """Помесячные показатели по годам и по сезонам — для графика «Сравнение лет».
+
+    Для текущего года (сезона) будущие месяцы считаются по уже сделанным броням.
+    «На эту дату» — показатели с начала каждого года по тот же день, что сегодня:
+    честное сравнение незаконченного года с прошлыми.
+    """
+    data_start = min(STATS_START, today)
+    bookings = _load(date(data_start.year - 1, 11, 1), date(today.year + 2, 1, 1))
+
+    result = {"today": today.isoformat(), "modes": {}}
+    for mode in ("year", "season"):
+        key_of = (lambda d: d.year) if mode == "year" else _season_key
+        cur_key = key_of(today)
+        keys = list(range(key_of(data_start), cur_key + 1))[-MAX_COMPARED:]
+        first_month = 1 if mode == "year" else 11
+        months = [MONTHS_SHORT[(first_month - 1 + i) % 12 + 1] for i in range(12)]
+        periods = []
+        for key in keys:
+            start, end, label = _bounds(mode, key)
+            from_ = max(start, data_start)
+            row = {
+                "key": key,
+                "label": label,
+                "current": key == cur_key,
+                "partial": start < data_start,
+                "finished": end <= today,
+                "months": [],
+            }
+            for i in range(12):
+                m_start, m_end = _add_months(start, i), _add_months(start, i + 1)
+                if m_end <= data_start:
+                    row["months"].append(None)  # до начала истории броней
+                    continue
+                item = _totals(bookings, max(m_start, data_start), m_end)
+                item["future"] = m_end > today
+                row["months"].append(item)
+            row["total"] = _totals(bookings, from_, end)
+            if mode == "season":
+                middle = _add_months(start, 6)
+                row["winter"] = _totals(bookings, from_, middle) if middle > data_start else None
+                row["summer"] = _totals(bookings, max(middle, data_start), end)
+            same_day = _shift_years(today, key - cur_key)
+            row["until"] = same_day.isoformat()
+            row["to_date"] = _totals(bookings, from_, min(same_day, end)) if same_day > from_ else None
+            periods.append(row)
+
+        for prev, row in zip([None] + periods, periods):
+            comparable = prev is not None and not prev["partial"]
+            row["total_delta"] = (
+                _delta(row["total"]["revenue"], prev["total"]["revenue"])
+                if comparable and row["finished"] and prev["finished"]
+                else None
+            )
+            row["to_date_delta"] = (
+                _delta(row["to_date"]["revenue"], prev["to_date"]["revenue"])
+                if comparable and row["to_date"] and prev["to_date"]
+                else None
+            )
+        result["modes"][mode] = {"months": months, "periods": periods}
+    return result

@@ -1,0 +1,42 @@
+{% extends "booking/base.html" %}
+{% load booking_extras %}
+{% block title %}Дубли броней{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px"><a href="{% url 'calendar' %}">← Календарь</a></div>
+<div class="card">
+  <h1 style="margin-top:0">Дубли броней</h1>
+  <p class="muted">Брони на одни и те же даты — обычно это одна бронь, которая пришла дважды: из загрузки RealtyCalendar
+    (или внесена вручную) и из календаря площадки по iCal. При объединении останется одна бронь со всеми данными:
+    гостем, суммой, платежами и комментариями. Чтобы выбрать значения самостоятельно, откройте «Подробнее».</p>
+  {% if rows %}
+  <form method="post">
+    {% csrf_token %}
+    <ul class="dup-list">
+      {% for r in rows %}
+      <li>
+        <input type="checkbox" name="pair" value="{{ r.key }}" id="pair-{{ r.key }}" checked aria-label="Объединить брони на {{ r.plan.a.check_in|date:'d.m' }}–{{ r.plan.a.check_out|date:'d.m.Y' }}">
+        <div>
+          <label for="pair-{{ r.key }}"><b>{{ r.plan.a.check_in|date:"d.m" }}–{{ r.plan.a.check_out|date:"d.m.Y" }}</b> · {{ r.plan.a.nights }} н.</label>
+          <div class="dup-pair small">
+            {% for x in r.plan.a|pair_with:r.plan.b %}
+            <span><span class="dot" style="--c: {{ x.color }}"></span> <a href="{% url 'booking_edit' x.pk %}">{{ x.source_name }}{% if x.is_imported %} (iCal){% endif %}: {{ x.title }}{% if x.total_price is not None %}, {{ x.total_price|rub }} ₽{% endif %}</a></span>
+            {% endfor %}
+          </div>
+          <div class="dup-result small">Итог: {{ r.summary }}</div>
+          {% for n in r.plan.difference_notes %}<div class="small warn-text">⚠ {{ n }}</div>{% endfor %}
+          {% for w in r.plan.warnings %}<div class="small warn-text">⚠ {{ w }}</div>{% endfor %}
+          <a class="small" href="{% url 'booking_merge' r.plan.a.pk r.plan.b.pk %}">Подробнее и выбрать значения</a>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" type="submit">Объединить отмеченные</button>
+      <a class="btn" href="{% url 'calendar' %}">Отмена</a>
+    </div>
+  </form>
+  {% else %}
+  <p>Дублей нет.</p>
+  {% endif %}
+</div>
+{% endblock %}

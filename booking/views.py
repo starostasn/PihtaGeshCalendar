@@ -17,11 +17,11 @@ from django.views.decorators.http import require_POST
 from .forms import BookingForm, ChannelForm, HouseForm, PaymentForm, PeriodPriceForm, PriceRuleForm
 from .ical import build_export, sync_channel
 from .guests import guest_choice_payload
-from .models import Booking, Channel, Guest, House, Payment, PriceRule, SyncLog
+from .models import Booking, Channel, Guest, House, LinkedEvent, Payment, PriceRule, SyncLog
 from .permissions import admin_required, forbidden, is_admin
 from .pricing import PriceCalculator
-from .services import OverlapError, conflict_pairs, is_possible_echo, save_booking
-from .stats import PRESETS, build_dashboard, resolve_period
+from .services import OverlapError, conflict_pairs, find_overlaps, is_possible_echo, save_booking
+from .stats import PRESETS, build_comparison, build_dashboard, resolve_period
 
 MONTH_NAMES = [
     "",
@@ -135,7 +135,11 @@ def calendar_view(request):
         .prefetch_related("payments")
         .order_by("check_in")[:20]
     )
-    conflicts = [(a, b, is_possible_echo(a, b)) for a, b in conflict_pairs()]
+    conflicts = [
+        {"a": a, "b": b, "echo": is_possible_echo(a, b), "same_dates": a.check_in == b.check_in and a.check_out == b.check_out}
+        for a, b in conflict_pairs()
+    ]
+    duplicates_count = sum(1 for c in conflicts if c["same_dates"])
     failing = Channel.objects.filter(is_active=True, last_sync_ok=False)
 
     return render(
@@ -148,6 +152,7 @@ def calendar_view(request):
             "weekday_names": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
             "upcoming": upcoming,
             "conflicts": conflicts,
+            "duplicates_count": duplicates_count,
             "failing_channels": failing,
             "today": today,
             "channels": Channel.objects.all(),
@@ -218,12 +223,18 @@ def _booking_form_view(request, booking: Booking | None, payment_form: PaymentFo
     if booking is not None and payment_form is None:
         balance = booking.balance_due
         payment_form = PaymentForm(initial={"amount": balance if balance and balance > 0 else None})
+    overlaps, linked = [], []
+    if booking is not None and not booking.is_cancelled:
+        overlaps = find_overlaps(booking.check_in, booking.check_out, exclude_pk=booking.pk)
+        linked = list(booking.linked_events.select_related("channel"))
     return render(
         request,
         "booking/booking_form.html",
         {
             "form": form,
             "booking": booking,
+            "overlaps": overlaps,
+            "linked_events": linked,
             "is_new": is_new,
             "house": house,
             "payment_form": payment_form,
@@ -256,6 +267,20 @@ def payment_add(request, pk: int):
     payment.save()
     messages.success(request, f"{payment.get_kind_display()} {payment.amount:,} ₽ добавлена".replace(",", "\u00a0"))
     return redirect(f"{reverse('booking_edit', args=[pk])}#payments")
+
+
+@login_required
+@require_POST
+def linked_event_delete(request, pk: int):
+    """Отвязать событие площадки: при следующей синхронизации оно снова станет отдельной бронью."""
+    link = get_object_or_404(LinkedEvent.objects.select_related("channel"), pk=pk)
+    booking_pk = link.booking_id
+    link.delete()
+    messages.info(
+        request,
+        f"Событие «{link.channel.name}» отвязано. После следующей синхронизации оно появится отдельной бронью.",
+    )
+    return redirect("booking_edit", pk=booking_pk)
 
 
 @admin_required
@@ -484,6 +509,8 @@ def stats_view(request):
             "date_from": period.start,
             "date_to": period.last_day,
             "chart_data": dash.chart_data(),
+            "comparison": build_comparison(today),
+            "today": today,
             "sources_height": max(120, 40 * len(dash.sources) + 40),
         },
     )

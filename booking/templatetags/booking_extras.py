@@ -66,3 +66,9 @@ def amenity_icon(text):
         if key in low:
             return icon
     return "✓"
+
+
+@register.filter
+def pair_with(first, second):
+    """Для перебора двух объектов в шаблоне: {% for x in a|pair_with:b %}."""
+    return [first, second]

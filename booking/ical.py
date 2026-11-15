@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Booking, Channel, SyncLog
+from .models import Booking, Channel, LinkedEvent, SyncLog
 from .notify import send_telegram
 from .services import conflict_pairs, is_possible_echo
 
@@ -130,12 +130,14 @@ class SyncResult:
     created: list[Booking] = field(default_factory=list)
     updated: list[Booking] = field(default_factory=list)
     cancelled: list[Booking] = field(default_factory=list)
+    attached: list[Booking] = field(default_factory=list)  # бронь уже была внесена вручную — привязали
+    echoed: list[Booking] = field(default_factory=list)  # площадка показала нашу же бронь — запомнили
     warnings: list[str] = field(default_factory=list)
     error: str = ""
 
     @property
     def touched(self) -> list[Booking]:
-        return self.created + self.updated
+        return self.created + self.updated + self.attached
 
 
 def _fmt(b: Booking) -> str:
@@ -144,6 +146,28 @@ def _fmt(b: Booking) -> str:
 
 def _label(b: Booking) -> str:
     return f"{b.source_name}{' (заявка)' if b.is_request else ''} {_fmt(b)}"
+
+
+def _same_platform(x: Channel | None, y: Channel) -> bool:
+    return x is not None and (x.pk == y.pk or x.name.strip().lower() == y.name.strip().lower())
+
+
+def _twin_action(channel: Channel, twin: Booking) -> str:
+    """Что делать с новой бронью площадки, если у нас уже есть бронь ровно на эти даты.
+
+    attach — это та же бронь площадки, внесённая вручную (источник — эта площадка): привязываем.
+    echo — площадка показывает нашу же бронь, которую получила из нашего календаря:
+           бронь подтверждена и создана до того, как площадка последний раз забрала наш календарь.
+    """
+    if _same_platform(twin.channel, channel):
+        return "attach"
+    if (
+        twin.status == Booking.Status.CONFIRMED
+        and channel.last_exported_at is not None
+        and twin.created_at < channel.last_exported_at
+    ):
+        return "echo"
+    return ""
 
 
 def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
@@ -159,21 +183,50 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
             b for b in imported.values() if b.status == Booking.Status.CONFIRMED and b.check_out > today
         ]
 
-        if not relevant and len(current) >= 2:
+        future_links = LinkedEvent.objects.filter(channel=channel, check_out__gt=today).count()
+        if not relevant and len(current) + future_links >= 2:
             # Площадка отдала пустой календарь, хотя у нас несколько её будущих броней.
             # Скорее всего, это сбой площадки — массово отменять брони опасно.
             result.warnings.append(
-                f"Календарь «{channel.name}» пришёл пустым, хотя у нас {len(current)} будущих брони "
+                f"Календарь «{channel.name}» пришёл пустым, хотя у нас {len(current) + future_links} будущих брони "
                 "с этой площадки. Отмены не применены — проверьте календарь на площадке."
             )
             return result
+
+        # События, которые мы уже связали со своими бронями (дубли после объединения), — пропускаем.
+        links = {link.uid: link for link in LinkedEvent.objects.filter(channel=channel)}
+        orphan_links = {(l.check_in, l.check_out): l for l in links.values() if l.uid not in feed_uids}
 
         # Брони, чей UID пропал из календаря, — кандидаты на «смену UID» (сопоставляем по датам).
         orphans_by_dates = {
             (b.check_in, b.check_out): b for b in current if b.external_uid not in feed_uids
         }
 
+        # Наши брони (не с iCal) по датам — чтобы не создавать дубль, если бронь уже внесена.
+        twins: dict[tuple, list[Booking]] = {}
+        for b in (
+            Booking.objects.active()
+            .filter(external_uid="", check_out__gt=today)
+            .select_related("channel")
+            .order_by("pk")
+        ):
+            twins.setdefault((b.check_in, b.check_out), []).append(b)
+
         for ev in relevant:
+            link = links.get(ev.uid)
+            if link is None and ev.uid not in imported:
+                link = orphan_links.pop((ev.start, ev.end), None)
+                if link is not None:  # площадка сменила UID связанного события
+                    del links[link.uid]
+                    link.uid = ev.uid
+                    links[ev.uid] = link
+                    link.save(update_fields=["uid"])
+            if link is not None:
+                if (link.check_in, link.check_out) != (ev.start, ev.end):
+                    link.check_in, link.check_out = ev.start, ev.end
+                    link.save(update_fields=["check_in", "check_out"])
+                continue
+
             booking = imported.get(ev.uid)
             if booking is None:
                 booking = orphans_by_dates.pop((ev.start, ev.end), None)
@@ -184,6 +237,27 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
                     booking.save(update_fields=["external_uid", "updated_at"])
 
             if booking is None:
+                same_dates = twins.get((ev.start, ev.end), [])
+                action = _twin_action(channel, same_dates[0]) if len(same_dates) == 1 else ""
+                if action == "attach":
+                    booking = same_dates.pop()
+                    booking.channel = channel
+                    booking.external_uid = ev.uid
+                    booking.external_summary = ev.summary[:500]
+                    booking.status = Booking.Status.CONFIRMED
+                    booking.save()
+                    imported[ev.uid] = booking
+                    result.attached.append(booking)
+                    continue
+                if action == "echo":
+                    twin = same_dates.pop()
+                    links[ev.uid] = LinkedEvent.objects.create(
+                        channel=channel, uid=ev.uid, booking=twin, check_in=ev.start, check_out=ev.end,
+                        summary=ev.summary[:500],
+                    )
+                    result.echoed.append(twin)
+                    continue
+
                 booking = Booking.objects.create(
                     kind=Booking.Kind.BOOKING,
                     channel=channel,
@@ -216,6 +290,9 @@ def apply_feed(channel: Channel, events: list[FeedEvent]) -> SyncResult:
                 booking.save(update_fields=["status", "cancel_reason", "updated_at"])
                 result.cancelled.append(booking)
 
+        # Связанное событие пропало с площадки — связь больше не нужна.
+        LinkedEvent.objects.filter(channel=channel).exclude(uid__in=list(feed_uids)).delete()
+
     return result
 
 
@@ -226,7 +303,10 @@ def _conflict_warnings(touched: list[Booking]) -> list[str]:
         if a.pk in touched_ids or b.pk in touched_ids:
             line = f"⚠️ ДВОЙНАЯ БРОНЬ: {_label(a)} и {_label(b)}"
             if is_possible_echo(a, b):
-                line += " — даты совпадают полностью, возможно, это площадка вернула вашу же бронь"
+                line += (
+                    " — даты совпадают полностью: возможно, это дубль (площадка вернула вашу же бронь)."
+                    " Откройте календарь и нажмите «Объединить»"
+                )
             lines.append(line)
     return lines
 
@@ -248,6 +328,8 @@ def sync_channel(channel: Channel, fetch=fetch_feed, notify=send_telegram) -> Sy
         messages.append(f"✏️ Изменилась бронь с «{channel.name}»: {_fmt(b)}")
     for b in result.cancelled:
         messages.append(f"❌ Отменена бронь с «{channel.name}»: {_fmt(b)}")
+    for b in result.attached:
+        messages.append(f"🔗 Бронь с «{channel.name}» {_fmt(b)} уже была внесена — привязана к ней, дубля нет")
     messages += result.warnings
     if result.ok:
         messages += _conflict_warnings(result.touched)
@@ -257,6 +339,9 @@ def sync_channel(channel: Channel, fetch=fetch_feed, notify=send_telegram) -> Sy
         if result.ok
         else f"Ошибка: {result.error}"
     )
+    linked = len(result.attached) + len(result.echoed)
+    if linked:
+        summary += f", связано с уже внесёнными: {linked}"
     if result.warnings:
         summary += ". " + " ".join(result.warnings)
 

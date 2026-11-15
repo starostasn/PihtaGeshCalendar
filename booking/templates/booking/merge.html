@@ -1,0 +1,82 @@
+{% extends "booking/base.html" %}
+{% load static booking_extras %}
+{% block title %}Объединить брони{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:8px">
+  <a href="{% url 'calendar' %}?m={{ a.check_in|date:'Y-m' }}">← Календарь</a>
+</div>
+<div class="card">
+  <h1 style="margin-top:0">Объединить брони</h1>
+  <p class="muted">Останется одна бронь. Где значения отличаются, выберите, какое оставить; пустые поля заполнятся из другой брони.
+    Комментарии объединятся, все платежи перейдут в итоговую бронь.</p>
+  {% for w in plan.warnings %}<div class="msg warning">{{ w }}</div>{% endfor %}
+
+  <form method="post" class="form" id="mergeForm">
+    {% csrf_token %}
+    <div class="scroll-x">
+    <table class="list merge-table">
+      <tr>
+        <th></th>
+        <th>Бронь 1 <span class="muted small">· {{ a.source_name }}{% if a.is_imported %} по iCal{% elif a.import_batch_id %} · из загрузки{% else %} · внесена вручную{% endif %}</span></th>
+        <th>Бронь 2 <span class="muted small">· {{ b.source_name }}{% if b.is_imported %} по iCal{% elif b.import_batch_id %} · из загрузки{% else %} · внесена вручную{% endif %}</span></th>
+      </tr>
+      {% for f in plan.fields %}
+      <tr{% if f.name == 'dates' or f.name == 'status' %} data-owner-locked{% endif %}>
+        <th scope="row">{{ f.label }}{% if f.differs %} <span class="badge warn">разные</span>{% endif %}</th>
+        {% if not f.choosable %}
+          <td colspan="2"{% if f.name == 'dates' or f.name == 'status' %} data-fixed{% endif %}>{{ f.value }}{% if f.note %} <span class="muted small">· {{ f.note }}</span>{% endif %}</td>
+        {% else %}
+          {% for side in "ab" %}
+          <td data-side="Бронь {% if side == 'a' %}1{% else %}2{% endif %}">
+            <label class="pick">
+              <input type="radio" name="choice_{{ f.name }}" value="{{ side }}"{% if f.default == side %} checked{% endif %}>
+              <span>{% if side == "a" %}{{ f.values.a }}{% else %}{{ f.values.b }}{% endif %}</span>
+            </label>
+          </td>
+          {% endfor %}
+        {% endif %}
+      </tr>
+      {% endfor %}
+      <tr>
+        <th scope="row">Комментарий</th>
+        <td class="small pre" data-side="Бронь 1">{{ a.comment|default:"—" }}</td>
+        <td class="small pre" data-side="Бронь 2">{{ b.comment|default:"—" }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Платежи</th>
+        {% for side, list in payments.items %}
+        <td class="small" data-side="Бронь {% if side == 'a' %}1{% else %}2{% endif %}">
+          {% for p in list %}<div>{{ p.date|date:"d.m.Y" }} · {% if p.kind == 'refund' %}−{% endif %}{{ p.amount|rub }} ₽ · {{ p.get_method_display }}</div>{% empty %}—{% endfor %}
+        </td>
+        {% endfor %}
+      </tr>
+    </table>
+    </div>
+
+    <div class="merge-result">
+      <h2>Что получится</h2>
+      <p data-mode="owner"{% if not owner_sides.a and not owner_sides.b %} hidden{% endif %}>
+        Бронь площадки: даты и статус и дальше будут обновляться синхронизацией — если гость отменит бронь на площадке,
+        она отменится и здесь. Гость, сумма, платежи и комментарий сохранятся.
+        <span class="lock-note muted small">Поэтому даты и статус берутся с площадки.</span>
+      </p>
+      <p data-mode="own"{% if owner_sides.a or owner_sides.b %} hidden{% endif %}>
+        {% if plan.has_imported %}
+        Ваша бронь с выбранным источником. Событие площадки на эти даты будет связано с ней: синхронизация перестанет
+        создавать из него отдельную бронь, а календарь по-прежнему закрывает эти даты на площадках.
+        Выберите этот вариант, если бронь на самом деле прямая (или с другой площадки), а площадка просто показывает занятые даты.
+        {% else %}
+        Обе брони внесены вручную: останется одна, вторая будет удалена.
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" type="submit">Объединить</button>
+      <a class="btn" href="{% url 'booking_edit' a.pk %}">Отмена</a>
+    </div>
+  </form>
+</div>
+{{ owner_sides|json_script:"merge-owners" }}
+{% endblock %}
+{% block scripts %}<script src="{% static 'booking/merge.js' %}"></script>{% endblock %}

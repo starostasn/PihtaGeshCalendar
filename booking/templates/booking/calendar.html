@@ -5,13 +5,23 @@
 {% for ch in failing_channels %}
   <div class="msg error">Не работает синхронизация с «{{ ch.name }}»: {{ ch.last_sync_message }}{% if is_admin %} — <a href="{% url 'channels' %}">подробнее</a>{% else %} — сообщите администратору{% endif %}</div>
 {% endfor %}
-{% for a, b, echo in conflicts %}
-  <div class="msg error">
-    ⚠️ Двойная бронь: <a href="{% url 'booking_edit' a.pk %}">{{ a.source_name }} {{ a.check_in|date:"d.m" }}–{{ a.check_out|date:"d.m" }}</a>
-    и <a href="{% url 'booking_edit' b.pk %}">{{ b.source_name }} {{ b.check_in|date:"d.m" }}–{{ b.check_out|date:"d.m" }}</a>.
-    {% if echo %}Даты совпадают полностью — возможно, площадка вернула вашу же бронь.{% endif %}
+{% if duplicates_count > 1 %}
+  <div class="msg warning msg-action">
+    <span>⚠️ Найдено {{ duplicates_count }} {{ duplicates_count|ru_plural:"дубль,дубля,дублей" }}: брони на одни и те же даты — скорее всего, одна бронь пришла дважды (из загрузки и с площадки). На календаре они отмечены красной штриховкой.</span>
+    <a class="btn small primary" href="{% url 'duplicates' %}">Объединить дубли</a>
   </div>
-{% endfor %}
+{% endif %}
+{% for c in conflicts %}{% if not c.same_dates or duplicates_count < 2 %}
+  <div class="msg error msg-action">
+    <span>
+    {% if c.same_dates %}⚠️ Похоже на дубль{% else %}⚠️ Двойная бронь{% endif %}:
+    <a href="{% url 'booking_edit' c.a.pk %}">{{ c.a.source_name }}{% if c.a.is_imported %} (iCal){% endif %} · {{ c.a.title }} · {{ c.a.check_in|date:"d.m" }}–{{ c.a.check_out|date:"d.m" }}</a>
+    и <a href="{% url 'booking_edit' c.b.pk %}">{{ c.b.source_name }}{% if c.b.is_imported %} (iCal){% endif %} · {{ c.b.title }} · {{ c.b.check_in|date:"d.m" }}–{{ c.b.check_out|date:"d.m" }}</a>.
+    {% if c.same_dates %}Даты совпадают полностью — это одна и та же бронь, пришедшая дважды.{% else %}Даты пересекаются частично — проверьте, не двойное ли это бронирование.{% endif %}
+    </span>
+    <a class="btn small" href="{% url 'booking_merge' c.a.pk c.b.pk %}">Объединить</a>
+  </div>
+{% endif %}{% endfor %}
 
 <div class="cal-head">
   <h1>Календарь</h1>

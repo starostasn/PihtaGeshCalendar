@@ -14,6 +14,21 @@
   {% if booking and booking.status == 'cancelled' and booking.cancel_reason %}
     <div class="msg warning" style="margin-top:12px">Отменена: {{ booking.cancel_reason }}.</div>
   {% endif %}
+  {% for o in overlaps %}
+    <div class="msg error msg-action small" style="margin-top:12px">
+      <span>{% if o.check_in == booking.check_in and o.check_out == booking.check_out %}На эти же даты есть ещё одна бронь — похоже на дубль{% else %}Пересекается с бронью{% endif %}:
+        <a href="{% url 'booking_edit' o.pk %}">{{ o.source_name }}{% if o.is_imported %} (iCal){% endif %} · {{ o.title }} · {{ o.check_in|date:"d.m" }}–{{ o.check_out|date:"d.m.Y" }}</a></span>
+      <a class="btn small" href="{% url 'booking_merge' booking.pk o.pk %}">Объединить</a>
+    </div>
+  {% endfor %}
+  {% for link in linked_events %}
+    <div class="msg info msg-action small" style="margin-top:12px">
+      <span>🔗 Связано с событием в календаре «{{ link.channel.name }}» ({{ link.check_in|date:"d.m" }}–{{ link.check_out|date:"d.m.Y" }}): площадка показывает эту же бронь — синхронизация его пропускает, дубля не будет.</span>
+      <form class="inline" method="post" action="{% url 'linked_event_delete' link.pk %}" data-confirm="Отвязать? После синхронизации событие площадки снова появится отдельной бронью.">
+        {% csrf_token %}<button class="btn small" type="submit">Отвязать</button>
+      </form>
+    </div>
+  {% endfor %}
   {% if booking and booking.is_imported %}
     <div class="msg warning small" style="margin-top:12px">
       Бронь пришла с площадки «{{ booking.source_name }}» по iCal{% if booking.external_summary %} («{{ booking.external_summary }}»){% endif %}.

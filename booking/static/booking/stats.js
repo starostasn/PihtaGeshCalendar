@@ -1,6 +1,7 @@
 // Графики страницы «Статистика». Цвета берутся из CSS-переменных, поэтому светлая
 // и тёмная темы работают без отдельной настройки. Одна серия на график — без легенды,
-// название графика говорит, что показано. Значения дублируются в таблицах под графиками.
+// название графика говорит, что показано (кроме сравнения лет: там легенда и подписи у линий).
+// Значения дублируются в таблицах под графиками.
 (function () {
   const form = document.getElementById("statsFilters");
   const custom = document.getElementById("customRange");
@@ -108,6 +109,152 @@
     });
   }
 
+  // ---- сравнение лет и сезонов: по линии на год, цвет закреплён за годом
+  // (самый свежий — первый цвет палитры), будущие месяцы — пунктиром.
+  const compare = JSON.parse(document.getElementById("compare-data").textContent);
+  const cmpMetric = document.getElementById("cmpMetric");
+  const METRICS = {
+    revenue: { fmt: rub, tick: compactRub },
+    occupancy: { fmt: pct, tick: pct, max: 100 },
+    occupied: { fmt: (v) => nf.format(v) + " ноч.", tick: (v) => nf.format(v) },
+    adr: { fmt: rub, tick: compactRub },
+    arrivals: { fmt: (v) => nf.format(v), tick: (v) => nf.format(v) },
+  };
+  const MONTHS_FULL = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+
+  function cmpMode() {
+    const el = document.querySelector("input[name=cmpMode]:checked");
+    return el ? el.value : "year";
+  }
+
+  function seriesColors(periods) {
+    const cs = getComputedStyle(document.documentElement);
+    // самый свежий год — слот 1, предыдущий — слот 2 и т. д.; не больше 8 линий
+    return periods.map((_, i) => cs.getPropertyValue(`--series-${periods.length - i}`).trim());
+  }
+
+  // Подписи у концов линий (при 4 линиях и меньше), раздвинутые, чтобы не налезали друг на друга.
+  const endLabels = {
+    id: "endLabels",
+    afterDatasetsDraw(chart, _args, opts) {
+      if (!opts || !opts.enabled) return;
+      const { ctx, chartArea } = chart;
+      const items = [];
+      chart.data.datasets.forEach((ds, i) => {
+        const meta = chart.getDatasetMeta(i);
+        if (meta.hidden) return;
+        for (let j = ds.data.length - 1; j >= 0; j--) {
+          if (ds.data[j] !== null && ds.data[j] !== undefined) {
+            items.push({ text: ds.label, x: meta.data[j].x, y: meta.data[j].y });
+            break;
+          }
+        }
+      });
+      items.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < items.length; i++) {
+        if (items[i].y - items[i - 1].y < 14) items[i].y = items[i - 1].y + 14;
+      }
+      const overflow = items.length ? items[items.length - 1].y - chartArea.bottom : 0;
+      if (overflow > 0) items.forEach((it) => { it.y -= overflow; });
+      ctx.save();
+      ctx.font = "600 11px system-ui, -apple-system, 'Segoe UI', sans-serif";
+      ctx.fillStyle = opts.color;
+      ctx.textBaseline = "middle";
+      items.forEach((it) => ctx.fillText(it.text, it.x + 8, it.y));
+      ctx.restore();
+    },
+  };
+
+  function renderCompare(t) {
+    const el = document.getElementById("chartCompare");
+    if (!el) return null;
+    const mode = cmpMode();
+    const metricKey = cmpMetric.value;
+    const metric = METRICS[metricKey];
+    const block = compare.modes[mode];
+    const periods = block.periods;
+    const colors = seriesColors(periods);
+
+    document.querySelectorAll("[data-cmp-mode]").forEach((node) => { node.hidden = node.dataset.cmpMode !== mode; });
+    document.querySelectorAll(`[data-cmp-mode=${mode}] .swatch`).forEach((sw) => {
+      const idx = periods.findIndex((p) => String(p.key) === sw.dataset.seriesKey);
+      if (idx >= 0) sw.style.setProperty("--c", colors[idx]);
+    });
+
+    const firstMonth = mode === "year" ? 0 : 10;
+    const direct = periods.length <= 4;
+    const datasets = periods.map((p, i) => ({
+      label: p.label,
+      // будущие месяцы, на которые ещё нет броней, не рисуем (иначе линия падает в ноль)
+      data: p.months.map((m) => (!m || (m.future && !m.occupied) ? null : m[metricKey])),
+      borderColor: colors[i],
+      backgroundColor: colors[i],
+      borderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      pointBorderColor: t.surface,
+      pointBorderWidth: 2,
+      pointHoverBorderWidth: 2,
+      cubicInterpolationMode: "monotone",
+      spanGaps: false,
+      segment: {
+        borderDash: (ctx) => (p.months[ctx.p1DataIndex] && p.months[ctx.p1DataIndex].future ? [5, 4] : undefined),
+      },
+    }));
+
+    const base = options(t, {
+      valueFmt: metric.fmt,
+      tickFmt: metric.tick,
+      max: metric.max,
+      title: (items) => {
+        const idx = (firstMonth + items[0].dataIndex) % 12;
+        return MONTHS_FULL[idx].charAt(0).toUpperCase() + MONTHS_FULL[idx].slice(1);
+      },
+      label: (item) => {
+        const m = periods[item.datasetIndex].months[item.dataIndex];
+        if (!m) return null;
+        return `${item.dataset.label}: ${metric.fmt(item.raw)}${m.future ? " (уже забронировано)" : ""}`;
+      },
+    });
+    base.plugins.tooltip.displayColors = true;
+    base.plugins.tooltip.usePointStyle = true;
+    base.plugins.tooltip.bodyFont = { size: 13, weight: "normal" };
+    base.plugins.tooltip.itemSort = (a, b) => b.datasetIndex - a.datasetIndex;
+    base.plugins.legend = {
+      display: true,
+      position: "top",
+      align: "start",
+      labels: {
+        color: t.text,
+        boxWidth: 18,
+        boxHeight: 3,
+        font: { size: 12 },
+        padding: 14,
+        generateLabels(chart) {
+          return chart.data.datasets.map((ds, i) => ({
+            text: ds.label,
+            fillStyle: ds.borderColor,
+            strokeStyle: ds.borderColor,
+            lineWidth: 0,
+            fontColor: t.text,
+            hidden: !chart.isDatasetVisible(i),
+            datasetIndex: i,
+          }));
+        },
+      },
+    };
+    base.plugins.endLabels = { enabled: direct, color: t.text };
+    base.layout.padding.right = direct ? 52 : 8;
+    base.scales.x.grid = { display: false };
+
+    return new Chart(el, {
+      type: "line",
+      data: { labels: block.months, datasets },
+      options: base,
+      plugins: [endLabels],
+    });
+  }
+
   let charts = [];
   function render() {
     charts.forEach((c) => c && c.destroy());
@@ -162,8 +309,11 @@
         title: (items) => "За " + items[0].label.replace(" дня", "") + " дн. до заезда",
         label: (item) => item.raw + " брон.",
       }),
+      renderCompare(t),
     ];
   }
+  document.querySelectorAll("input[name=cmpMode]").forEach((el) => el.addEventListener("change", render));
+  cmpMetric.addEventListener("change", render);
 
   render();
   const mq = window.matchMedia("(prefers-color-scheme: dark)");

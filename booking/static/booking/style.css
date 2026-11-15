@@ -30,6 +30,8 @@
   --ok-text: #1b5e20;
   --err-bg: #fdecea;
   --err-text: #8e1c1c;
+  --info-bg: #e8f1fb;
+  --info-text: #17436e;
   --sel: #e3f1e6;
   --radius: 12px;
   --ok-strong: #2E7D32;
@@ -39,6 +41,13 @@
   /* графики (палитра проверена на контраст и различимость) */
   --series-1: #2a78d6;
   --series-1-soft: #86b6ef;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   --grid: #e8e9ec;
   --axis: #c9ccd2;
 }
@@ -60,6 +69,8 @@
     --ok-text: #9be3a5;
     --err-bg: #3b1717;
     --err-text: #ffb4ab;
+    --info-bg: #142a40;
+    --info-text: #a9cdf5;
     --sel: #1f3a2a;
     --ok-strong: #3f9a47;
     --req-bg: #2c2347;
@@ -67,6 +78,13 @@
     --req-strong: #7d64d8;
     --series-1: #3987e5;
     --series-1-soft: #1c5cab;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #0ca30c;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     --grid: #233142;
     --axis: #34465a;
   }
@@ -103,6 +121,13 @@ h2 { font-size: 18px; margin: 24px 0 10px; }
 .topbar .brand img { display: block; border-radius: 8px; }
 .brand-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: 0.01em; }
 .nav-toggle { display: none; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+.topbar nav { display: flex; gap: 2px; flex-wrap: wrap; }
+.topbar nav a, .topbar nav button {
+  padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--text);
+  background: none; border: 0; font: inherit; cursor: pointer;
+}
+.topbar nav a.active { background: var(--sel); }
+/* на телефоне меню прячется под кнопку (это правило должно идти после общего) */
 @media (max-width: 1040px) {
   .nav-toggle { display: inline-flex; gap: 6px; align-items: center; }
   .topbar nav { display: none; width: 100%; flex-direction: column; gap: 2px; padding: 8px 0 4px; }
@@ -110,12 +135,6 @@ h2 { font-size: 18px; margin: 24px 0 10px; }
   .topbar nav a, .topbar nav button { padding: 10px 12px; font-size: 16px !important; text-align: left; }
   .topbar nav form { display: block; }
 }
-.topbar nav { display: flex; gap: 2px; flex-wrap: wrap; }
-.topbar nav a, .topbar nav button {
-  padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--text);
-  background: none; border: 0; font: inherit; cursor: pointer;
-}
-.topbar nav a.active { background: var(--sel); }
 
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
@@ -124,6 +143,12 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .msg.success { background: var(--ok-bg); color: var(--ok-text); }
 .msg.warning { background: var(--warn-bg); color: var(--warn-text); }
 .msg.error { background: var(--err-bg); color: var(--err-text); }
+.msg.info { background: var(--info-bg); color: var(--info-text); }
+.msg a { color: inherit; text-decoration: underline; }
+.msg-action { display: flex; gap: 8px 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.msg-action > span { flex: 1 1 280px; }
+.msg-action .btn { flex: none; }
+.msg-action form.inline { flex: none; }
 
 .btn {
   display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
@@ -429,3 +454,39 @@ ul.clean li { margin: 4px 0; }
 }
 .btn:focus-visible, .topbar nav a:focus-visible, .nav-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn.primary:hover { filter: brightness(1.08); }
+
+/* объединение дублей */
+.merge-table th[scope=row] { white-space: nowrap; width: 1%; padding-right: 14px; }
+.merge-table td { min-width: 200px; }
+.pick { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-weight: 400 !important; margin: 0 !important; }
+.pick:has(input:checked) { border-color: var(--accent); background: var(--sel); }
+.pick:has(input:disabled) { cursor: not-allowed; opacity: .75; }
+.pick input { margin-top: 3px; accent-color: var(--accent); }
+.pre { white-space: pre-line; }
+.merge-result { margin: 16px 0; padding: 12px 16px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.merge-result h2 { margin: 0 0 6px; font-size: 16px; }
+.merge-result p { margin: 0; }
+.lock-note { display: block; margin-top: 4px; }
+.dup-list { list-style: none; margin: 0; padding: 0; }
+.dup-list > li { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.dup-list > li:last-child { border-bottom: 0; }
+.dup-list input[type=checkbox] { margin-top: 4px; width: 18px; height: 18px; accent-color: var(--accent); }
+.dup-pair { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.dup-result { margin-top: 4px; }
+
+/* сравнение лет и сезонов */
+.compare-head { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.compare-head h2 { margin: 0 0 2px; font-size: 16px; }
+.compare-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.compare-controls select { width: auto; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; }
+.chart-box.chart-tall { height: 300px; }
+.compare-table th[scope=row] { white-space: nowrap; font-weight: 600; color: var(--text); }
+.compare-table .delta { font-size: 12px; }
+.swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--c, var(--muted)); margin-right: 6px; vertical-align: middle; }
+@media (max-width: 640px) {
+  .merge-table, .merge-table tbody, .merge-table tr, .merge-table th, .merge-table td { display: block; width: auto; }
+  .merge-table tr:first-child { display: none; }
+  .merge-table tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .merge-table th[scope=row], .merge-table td { border: 0; padding: 2px 0; min-width: 0; }
+  .merge-table td[data-side]::before { content: attr(data-side); display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+}

@@ -1165,3 +1165,278 @@ class HouseNameMigrationTests(TestCase):
             House.objects.create(name=old)
             mod.rename(apps, None)
             self.assertEqual(House.get().name, expected, old)
+
+
+# ---------------------------------------------------------------- дубли и объединение броней
+
+from .merge import build_plan, duplicate_pairs, merge_bookings  # noqa: E402
+from .models import LinkedEvent  # noqa: E402
+
+
+class MergeTests(TestCase):
+    """Типичный дубль: бронь загружена из RealtyCalendar, потом пришла с Авито по iCal."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("manager", password="very-secret-pass", first_name="Ира")
+        self.avito = Channel.objects.create(name="Авито", import_url="https://example.com/a.ics")
+        self.guest = G("Пётр", "+79000000007")
+        self.excel = Booking.objects.create(
+            check_in=d(10), check_out=d(14), channel=self.avito, guest=self.guest, guests=4,
+            total_price=40000, comment="Импорт из RealtyCalendar",
+        )
+        Payment.objects.create(booking=self.excel, amount=12000, method=Payment.Method.PLATFORM)
+        # Так дубли уже лежат в базе: бронь по iCal создана, пока авто-привязки не было
+        self.ical = Booking.objects.create(
+            check_in=d(10), check_out=d(14), channel=self.avito, external_uid="avito-1", external_summary="Reserved"
+        )
+
+    def test_duplicate_detected_and_plan_defaults(self):
+        self.assertEqual(len(duplicate_pairs()), 1)
+        plan = build_plan(self.ical, self.excel)
+        self.assertEqual((plan.a, plan.b), (self.excel, self.ical))  # остаётся бронь, внесённая людьми
+        self.assertEqual(plan.defaults()["channel"], "b")  # та же площадка — станет бронью площадки
+        self.assertEqual(plan.owner_sides(), {"a": "b", "b": "b"})
+        self.assertFalse(plan.has_differences)
+        self.assertIn("даты и статус дальше берутся с «Авито»", plan.summary())
+
+    def test_merge_into_platform_booking(self):
+        result = merge_bookings(self.ical, self.excel, user=self.user)
+        self.assertEqual(Booking.objects.count(), 1)
+        self.assertEqual(result.pk, self.excel.pk)
+        self.assertEqual((result.channel, result.external_uid), (self.avito, "avito-1"))
+        self.assertEqual((result.guest, result.guests, result.total_price), (self.guest, 4, 40000))
+        self.assertEqual(result.paid, 12000)
+        self.assertIn("Импорт из RealtyCalendar", result.comment)
+        self.assertIn("объединена с дублем — Авито · по iCal", result.comment)
+        self.assertIn("(Ира)", result.comment)
+        self.assertEqual(conflict_pairs(), [])
+        # Синхронизация дальше ведёт эту бронь: без изменений — ничего не происходит…
+        r = apply_feed(self.avito, [FeedEvent("avito-1", d(10), d(14))])
+        self.assertEqual((r.created, r.updated, r.cancelled), ([], [], []))
+        # …изменили даты на площадке — поменялись и у нас; отменили — отменилась
+        apply_feed(self.avito, [FeedEvent("avito-1", d(10), d(15))])
+        result.refresh_from_db()
+        self.assertEqual(result.check_out, d(15))
+        apply_feed(self.avito, [])
+        result.refresh_from_db()
+        self.assertTrue(result.is_cancelled)
+        self.assertEqual(result.paid, 12000)  # платежи и гость остались
+
+    def test_merge_keeps_own_booking_and_links_event(self):
+        # Прямая бронь, которую Авито показывает у себя занятой (эхо)
+        self.excel.channel = None
+        self.excel.save()
+        plan = build_plan(self.excel, self.ical)
+        self.assertEqual(plan.defaults()["channel"], "a")
+        self.assertEqual(plan.owner_sides(), {"a": "", "b": "b"})
+        self.assertIn("событие «Авито» будет пропускаться", plan.summary())
+
+        result = merge_bookings(self.excel, self.ical)
+        self.assertEqual(Booking.objects.count(), 1)
+        self.assertEqual((result.channel, result.external_uid), (None, ""))
+        link = LinkedEvent.objects.get()
+        self.assertEqual((link.channel, link.uid, link.booking), (self.avito, "avito-1", result))
+        # Синхронизация пропускает связанное событие — дубль не возвращается
+        r = apply_feed(self.avito, [FeedEvent("avito-1", d(10), d(14))])
+        self.assertEqual((r.created, r.updated), ([], []))
+        self.assertEqual(Booking.objects.count(), 1)
+        # Наша бронь по-прежнему уходит на Авито, иначе даты там откроются
+        self.assertIn(f"booking-{result.pk}@", build_export(self.avito).decode())
+        # Площадка сменила UID — связь переезжает по датам
+        apply_feed(self.avito, [FeedEvent("avito-2", d(10), d(14))])
+        self.assertEqual(LinkedEvent.objects.get().uid, "avito-2")
+        self.assertEqual(Booking.objects.count(), 1)
+        # Событие пропало с площадки — связь удаляется, наша бронь остаётся
+        apply_feed(self.avito, [FeedEvent("other", d(40), d(42))])
+        self.assertFalse(LinkedEvent.objects.exists())
+        result.refresh_from_db()
+        self.assertEqual(result.status, Booking.Status.CONFIRMED)
+
+    def test_user_choices_and_payments_from_both(self):
+        self.ical.total_price = 45000
+        self.ical.comment = "Сумма с площадки"
+        self.ical.save()
+        Payment.objects.create(booking=self.ical, amount=5000)
+        plan = build_plan(self.excel, self.ical)
+        self.assertTrue(plan.has_differences)
+        self.assertIn("Сумма: 40 000 ₽ или 45 000 ₽ — оставим 40 000 ₽", plan.difference_notes)
+        self.assertTrue(plan.warnings)  # платежи у обеих
+
+        result = merge_bookings(self.excel, self.ical, {"total_price": "b", "dates": "a"})
+        self.assertEqual(result.total_price, 45000)
+        self.assertEqual(result.paid, 17000)
+        self.assertIn("Сумма с площадки", result.comment)
+
+    def test_block_with_echo_stays_block(self):
+        block = Booking.objects.create(kind=Booking.Kind.BLOCK, check_in=d(20), check_out=d(22), comment="Ремонт")
+        echo = Booking.objects.create(check_in=d(20), check_out=d(22), channel=self.avito, external_uid="busy")
+        result = merge_bookings(echo, block)
+        self.assertEqual((result.kind, result.channel, result.guest), (Booking.Kind.BLOCK, None, None))
+        self.assertTrue(LinkedEvent.objects.filter(uid="busy", booking=block).exists())
+
+    def test_import_revert_after_merge(self):
+        from .importer import revert_batch
+
+        batch = ImportBatch.objects.create(filename="x.xls", status=ImportBatch.Status.APPLIED)
+        Booking.objects.filter(pk=self.excel.pk).update(import_batch=batch)
+        merge_bookings(self.excel, self.ical)
+        revert_batch(batch)
+        self.assertEqual(Booking.objects.count(), 0)
+        # Следующая синхронизация вернёт бронь площадки — как до загрузки
+        r = apply_feed(self.avito, [FeedEvent("avito-1", d(10), d(14))])
+        self.assertEqual(len(r.created), 1)
+
+    def test_pages(self):
+        self.client.force_login(self.user)
+        cal = self.client.get(reverse("calendar"))
+        self.assertContains(cal, "Похоже на дубль")
+        self.assertContains(cal, reverse("booking_merge", args=[self.excel.pk, self.ical.pk]))
+        card = self.client.get(reverse("booking_edit", args=[self.excel.pk]))
+        self.assertContains(card, "похоже на дубль")
+        page = self.client.get(reverse("booking_merge", args=[self.ical.pk, self.excel.pk]))
+        self.assertContains(page, "Объединить брони")
+        self.assertContains(page, "merge-owners")
+        resp = self.client.post(reverse("booking_merge", args=[self.ical.pk, self.excel.pk]), {"choice_channel": "b"})
+        self.assertRedirects(resp, reverse("booking_edit", args=[self.excel.pk]))
+        self.assertEqual(Booking.objects.count(), 1)
+        self.assertEqual(self.client.get(reverse("booking_merge", args=[self.excel.pk, self.excel.pk])).status_code, 302)
+
+    def test_bulk_merge_chain(self):
+        # Три брони на одни даты (загрузка, ручная и iCal) и ещё один дубль
+        Booking.objects.create(check_in=d(10), check_out=d(14), comment="Внесли ещё раз вручную")
+        other = Booking.objects.create(check_in=d(30), check_out=d(33), channel=self.avito, guest=G("Анна"))
+        Booking.objects.create(check_in=d(30), check_out=d(33), channel=self.avito, external_uid="avito-3")
+        self.assertEqual(len(duplicate_pairs()), 4)
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("duplicates"))
+        keys = [r["key"] for r in page.context["rows"]]
+        self.client.post(reverse("duplicates"), {"pair": keys})
+        self.assertEqual(duplicate_pairs(), [])
+        self.assertEqual(Booking.objects.count(), 2)
+        other.refresh_from_db()
+        self.assertEqual((other.external_uid, other.guest.name), ("avito-3", "Анна"))
+
+
+class AutoLinkSyncTests(TestCase):
+    def setUp(self):
+        self.avito = Channel.objects.create(name="Авито", import_url="https://example.com/a.ics")
+
+    def test_manual_platform_booking_is_attached_not_duplicated(self):
+        manual = Booking.objects.create(
+            check_in=d(5), check_out=d(8), channel=self.avito, guest=G("Олег"), status=Booking.Status.REQUEST
+        )
+        sent = []
+        sync_channel(self.avito, fetch=lambda url: ics(vevent("a1", d(5), d(8))), notify=lambda t: sent.append(t))
+        self.assertEqual(Booking.objects.count(), 1)
+        manual.refresh_from_db()
+        self.assertEqual((manual.external_uid, manual.status), ("a1", Booking.Status.CONFIRMED))
+        self.assertIn("уже была внесена", sent[0])
+        # Тот же канал с тем же названием (созданный при загрузке) тоже считается этой площадкой
+        rc_avito = Channel.objects.create(name="авито ")
+        Booking.objects.create(check_in=d(20), check_out=d(22), channel=rc_avito)
+        apply_feed(self.avito, [FeedEvent("a1", d(5), d(8)), FeedEvent("a2", d(20), d(22))])
+        self.assertEqual(Booking.objects.count(), 2)
+
+    def test_echo_of_exported_booking_is_linked(self):
+        own = save_booking(Booking(check_in=d(5), check_out=d(8), guest=G("Свой")))
+        # Площадка ещё не забирала наш календарь — это может быть настоящая двойная бронь
+        apply_feed(self.avito, [FeedEvent("e1", d(5), d(8))])
+        self.assertEqual(len(conflict_pairs()), 1)
+        Booking.objects.filter(external_uid="e1").delete()
+        # После того как площадка забрала календарь с этой бронью — это эхо
+        Channel.objects.filter(pk=self.avito.pk).update(last_exported_at=timezone.now() + timedelta(seconds=1))
+        self.avito.refresh_from_db()
+        r = apply_feed(self.avito, [FeedEvent("e1", d(5), d(8))])
+        self.assertEqual((r.created, r.echoed), ([], [own]))
+        self.assertEqual(LinkedEvent.objects.get().booking, own)
+        self.assertEqual(conflict_pairs(), [])
+
+    def test_request_is_not_treated_as_echo(self):
+        Booking.objects.create(check_in=d(5), check_out=d(8), status=Booking.Status.REQUEST)
+        Channel.objects.filter(pk=self.avito.pk).update(last_exported_at=timezone.now() + timedelta(seconds=1))
+        self.avito.refresh_from_db()
+        r = apply_feed(self.avito, [FeedEvent("e1", d(5), d(8))])
+        self.assertEqual(len(r.created), 1)  # заявки на площадки не уходят — это не эхо
+
+    def test_empty_feed_keeps_links(self):
+        own = Booking.objects.create(check_in=d(5), check_out=d(8))
+        LinkedEvent.objects.create(channel=self.avito, uid="e1", booking=own, check_in=d(5), check_out=d(8))
+        apply_feed(self.avito, [FeedEvent("x", d(15), d(18))])
+        LinkedEvent.objects.create(channel=self.avito, uid="x2", booking=own, check_in=d(5), check_out=d(8))
+        r = apply_feed(self.avito, [])
+        self.assertTrue(r.warnings)
+        self.assertEqual(LinkedEvent.objects.filter(uid="x2").count(), 1)
+
+    def test_unlink_view(self):
+        self.client.force_login(User.objects.create_user("m", password="very-secret-pass"))
+        own = Booking.objects.create(check_in=d(5), check_out=d(8))
+        link = LinkedEvent.objects.create(channel=self.avito, uid="e1", booking=own, check_in=d(5), check_out=d(8))
+        self.assertContains(self.client.get(reverse("booking_edit", args=[own.pk])), "Связано с событием")
+        self.client.post(reverse("linked_event_delete", args=[link.pk]))
+        self.assertFalse(LinkedEvent.objects.exists())
+
+
+class StatsComparisonTests(TestCase):
+    def test_all_time_preset(self):
+        from datetime import date as _date
+
+        today = _date(2026, 11, 15)
+        p = resolve_period("all", None, None, today)
+        self.assertEqual((p.start, p.last_day, p.previous()), (_date(2023, 1, 1), today, None))
+        Booking.objects.create(check_in=_date(2023, 2, 1), check_out=_date(2023, 2, 3), total_price=20000)
+        dash = build_dashboard(p, today)
+        self.assertEqual(dash.kpi["revenue"], 20000)
+        self.assertIsNone(dash.kpi["revenue_delta"])  # сравнивать не с чем
+        self.assertEqual(dash.granularity, "month")
+        self.assertEqual(dash.series[0]["label"], "янв 23")
+
+    def test_years_and_seasons(self):
+        from datetime import date as _date
+
+        from .stats import build_comparison
+
+        today = _date(2026, 11, 15)
+        Booking.objects.create(check_in=_date(2024, 12, 30), check_out=_date(2025, 1, 2), total_price=30000)  # 2 ночи 2024, 1 — 2025
+        Booking.objects.create(check_in=_date(2025, 7, 1), check_out=_date(2025, 7, 3), total_price=20000)
+        Booking.objects.create(check_in=_date(2025, 11, 10), check_out=_date(2025, 11, 12), total_price=10000)
+        Booking.objects.create(check_in=_date(2026, 11, 10), check_out=_date(2026, 11, 12), total_price=14000)
+        Booking.objects.create(check_in=_date(2026, 12, 1), check_out=_date(2026, 12, 2), total_price=9000)  # будущая
+        Booking.objects.create(check_in=_date(2026, 1, 5), check_out=_date(2026, 1, 6), total_price=1,
+                               status=Booking.Status.CANCELLED)
+        data = build_comparison(today)
+
+        years = {p["key"]: p for p in data["modes"]["year"]["periods"]}
+        self.assertEqual(sorted(years), [2023, 2024, 2025, 2026])
+        self.assertEqual(years[2024]["total"]["revenue"], 20000)
+        self.assertEqual(years[2025]["total"]["revenue"], 10000 + 20000 + 10000)
+        self.assertEqual(years[2025]["months"][0]["revenue"], 10000)  # январь 2025
+        self.assertEqual(years[2025]["total_delta"]["text"], "+100%")
+        self.assertIsNone(years[2026]["total_delta"])  # год ещё идёт
+        self.assertTrue(years[2026]["current"])
+        self.assertTrue(years[2026]["months"][11]["future"])
+        self.assertEqual(years[2026]["months"][11]["revenue"], 9000)
+        # «На 15.11»: с начала года по тот же день
+        self.assertEqual(years[2026]["to_date"]["revenue"], 14000)
+        self.assertEqual(years[2025]["to_date"]["revenue"], 40000)
+        self.assertEqual(years[2026]["to_date_delta"]["text"], "−65%")
+
+        seasons = {p["key"]: p for p in data["modes"]["season"]["periods"]}
+        self.assertEqual(sorted(seasons), [2022, 2023, 2024, 2025, 2026])
+        self.assertEqual(seasons[2026]["label"], "2026/27")
+        self.assertTrue(seasons[2022]["partial"])
+        self.assertIsNone(seasons[2022]["months"][0])  # ноябрь 2022 — до начала истории
+        self.assertEqual(data["modes"]["season"]["months"][0], "ноя")
+        s24 = seasons[2024]
+        self.assertEqual((s24["winter"]["revenue"], s24["summer"]["revenue"]), (30000, 20000))
+        self.assertEqual(seasons[2026]["total"]["revenue"], 14000 + 9000)
+        self.assertEqual(seasons[2026]["to_date"]["revenue"], 14000)
+        self.assertEqual(seasons[2025]["to_date"]["revenue"], 10000)
+
+    def test_page_has_comparison_and_all_preset(self):
+        self.client.force_login(User.objects.create_user("owner", password="very-secret-pass"))
+        Booking.objects.create(check_in=d(-400), check_out=d(-397), total_price=30000)
+        resp = self.client.get(reverse("stats"), {"period": "all"})
+        self.assertContains(resp, "За всё время")
+        self.assertContains(resp, "Сравнение лет и сезонов")
+        self.assertContains(resp, 'id="compare-data"')
+        self.assertNotContains(resp, "сравнение: ")

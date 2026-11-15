@@ -1,0 +1,28 @@
+{% load booking_extras %}
+<table class="list small compare-table">
+  <tr>
+    <th>{% if season %}Сезон{% else %}Год{% endif %}</th>
+    <th class="num">Выручка</th>
+    <th class="num">Ночей</th>
+    <th class="num">Загрузка</th>
+    <th class="num">Средняя цена</th>
+    <th class="num">Заездов</th>
+    {% if season %}<th class="num">Зима, ноя–апр</th><th class="num">Лето, май–окт</th>{% endif %}
+    <th class="num">На {{ today|date:"d.m" }}</th>
+  </tr>
+  {% for p in periods reversed %}
+  <tr>
+    <th scope="row"><span class="swatch" data-series-key="{{ p.key }}"></span>{{ p.label }}{% if p.current %} <span class="badge">идёт</span>{% elif p.partial %} <span class="badge warn" title="История броней — с 01.01.2023">неполный</span>{% endif %}</th>
+    <td class="num">{{ p.total.revenue|rub }} ₽{% if p.total_delta %}<br>{% include "booking/_delta.html" with d=p.total_delta %}{% endif %}</td>
+    <td class="num">{{ p.total.occupied }}</td>
+    <td class="num">{% if p.total.occupancy is not None %}{{ p.total.occupancy|floatformat:0 }}%{% else %}—{% endif %}</td>
+    <td class="num">{% if p.total.adr is not None %}{{ p.total.adr|rub }} ₽{% else %}—{% endif %}</td>
+    <td class="num">{{ p.total.arrivals }}</td>
+    {% if season %}
+    <td class="num">{% if p.winter %}{{ p.winter.revenue|rub }} ₽{% else %}—{% endif %}</td>
+    <td class="num">{{ p.summer.revenue|rub }} ₽</td>
+    {% endif %}
+    <td class="num">{% if p.to_date %}{{ p.to_date.revenue|rub }} ₽{% if p.to_date_delta %}<br>{% include "booking/_delta.html" with d=p.to_date_delta %}{% endif %}{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>

@@ -438,6 +438,31 @@ class Booking(models.Model):
         return self.external_summary or "Бронь"
 
 
+class LinkedEvent(models.Model):
+    """Событие из календаря площадки, которое — та же бронь, что уже есть у нас.
+
+    Так бывает, когда площадка показывает в своём календаре наши же закрытые даты
+    (прямую бронь или бронь с другой площадки). Синхронизация такие события пропускает,
+    поэтому дубль не появляется снова. Связь исчезает сама, когда событие пропадает с площадки.
+    """
+
+    channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="linked_events")
+    uid = models.CharField(max_length=500)
+    booking = models.ForeignKey("Booking", on_delete=models.CASCADE, related_name="linked_events")
+    check_in = models.DateField()
+    check_out = models.DateField()
+    summary = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Связанное событие площадки"
+        verbose_name_plural = "Связанные события площадок"
+        constraints = [models.UniqueConstraint(fields=["channel", "uid"], name="linked_event_unique_uid")]
+
+    def __str__(self):
+        return f"{self.channel}: {self.check_in:%d.%m}–{self.check_out:%d.%m.%Y} → бронь {self.booking_id}"
+
+
 class SyncLog(models.Model):
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="sync_logs")
     started_at = models.DateTimeField(auto_now_add=True)

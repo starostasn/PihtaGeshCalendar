@@ -4,7 +4,7 @@
 {% block content %}
 <div class="cal-head">
   <h1>Статистика</h1>
-  <span class="muted">{{ dash.period.label }} · сравнение: {{ dash.prev.label }}</span>
+  <span class="muted">{{ dash.period.label }}{% if dash.prev %} · сравнение: {{ dash.prev.label }}{% endif %}</span>
 </div>
 
 <form class="filters" method="get" id="statsFilters">
@@ -145,6 +145,38 @@
   </figure>
 </section>
 
+<section class="card compare" id="compare" aria-labelledby="compareTitle">
+  <div class="compare-head">
+    <div>
+      <h2 id="compareTitle">Сравнение лет и сезонов</h2>
+      <span class="muted small">По месяцам, не зависит от выбранного выше периода. Пунктир — месяцы, которые ещё не закончились: по уже сделанным броням.</span>
+    </div>
+    <div class="compare-controls">
+      <div class="seg" role="radiogroup" aria-label="Что сравнивать">
+        <label class="seg-item"><input type="radio" name="cmpMode" value="year" checked><span>Годы</span></label>
+        <label class="seg-item"><input type="radio" name="cmpMode" value="season"><span>Сезоны</span></label>
+      </div>
+      <select id="cmpMetric" aria-label="Показатель">
+        <option value="revenue">Выручка</option>
+        <option value="occupancy">Загрузка</option>
+        <option value="occupied">Занятые ночи</option>
+        <option value="adr">Средняя цена ночи</option>
+        <option value="arrivals">Заезды</option>
+      </select>
+    </div>
+  </div>
+  <p class="muted small" data-cmp-mode="season" hidden>Сезон — с 1 ноября по 31 октября: сначала зима (ноябрь–апрель), потом лето.</p>
+  <div class="chart-box chart-tall"><canvas id="chartCompare" role="img" aria-label="Показатель по месяцам для каждого года, таблица ниже"></canvas></div>
+  <div class="scroll-x" data-cmp-mode="year">
+    {% include "booking/_compare_table.html" with periods=comparison.modes.year.periods season=False %}
+  </div>
+  <div class="scroll-x" data-cmp-mode="season" hidden>
+    {% include "booking/_compare_table.html" with periods=comparison.modes.season.periods season=True %}
+  </div>
+  <p class="muted small">«На {{ today|date:"d.m" }}» — выручка с начала года (сезона) по тот же день: так незаконченный год честно сравнивается с прошлыми.
+    Изменение в столбце «Выручка» показано только для закончившихся лет.</p>
+</section>
+
 <section class="card" id="debts">
   <h2 style="margin-top:0">Ждём оплату</h2>
   {% if dash.debts %}
@@ -165,6 +197,7 @@
   попадает в оба. В выручку и загрузку входят только брони со статусом «Бронь»; заявки и отмены считаются отдельно.</p>
 
 {{ chart_data|json_script:"chart-data" }}
+{{ comparison|json_script:"compare-data" }}
 {% endblock %}
 {% block scripts %}
 <script src="{% static 'booking/vendor/chart.umd.min.js' %}"></script>
