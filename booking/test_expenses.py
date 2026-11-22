@@ -155,6 +155,22 @@ class ExpenseTests(TestCase):
             response = self.client.get(reverse("expenses"), {"tab": tab, "year": 2023})
             self.assertContains(response, 'name="year" value="2023" checked')
 
+    def test_undated_preliminary_expense_counts_in_year_only(self):
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "Предварительные расходы"
+        sheet.append(["Журнал"])
+        sheet.append(["№", "Дата", "Назначение", "Плательщик"])
+        sheet.append([1, None, "Сваи", 300])
+        upload = BytesIO()
+        book.save(upload)
+        self.assertEqual(stage(upload), (1, 0, 1))
+        entry = Expense.objects.get()
+        self.assertEqual((entry.period, entry.paid, entry.year_only), (None, None, 2018))
+        for filters, total in [({"year":2018}, 300), ({"year":2018, "month":1}, 0)]:
+            response = self.client.get(reverse("expenses"), filters)
+            self.assertEqual(response.context["dashboard"]["total"], total)
+
     def test_manager_cannot_view_finances(self):
         self.user.is_superuser = False
         self.user.save()

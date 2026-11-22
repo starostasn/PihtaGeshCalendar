@@ -1,6 +1,7 @@
 import re
 from collections import Counter, defaultdict
 from decimal import Decimal
+from django.db.models import Q
 
 from .models import Expense, PayerContribution
 from .stats import MONTHS_SHORT
@@ -35,14 +36,18 @@ def compare_expenses(rows, year, baseline, month):
     months = [month] if month else list(range(1, 13))
     series = {y: Counter() for y in (year, baseline)}
     groups = {y: Counter() for y in (year, baseline)}
-    for period, kind, amount in rows.filter(period__year__in=series).values_list("period", "kind", "amount"):
-        series[period.year][period.month] += amount
-        groups[period.year][kind] += amount
+    relevant = Q(period__year__in=series) | Q(period__isnull=True, year_only__in=series)
+    for period, fallback, kind, amount in rows.filter(relevant).values_list("period", "year_only", "kind", "amount"):
+        y = period.year if period else fallback
+        series[y][period.month if period else 0] += amount
+        groups[y][kind] += amount
+    if not month and any(0 in values for values in series.values()):
+        months.append(0)
     current = sum(series[year].values())
     previous = sum(series[baseline].values())
     return dict(year=year, baseline=baseline, current=current, previous=previous,
                 delta=current-previous, percent=(current-previous)*100/previous if previous else None,
-                labels=[MONTHS_SHORT[m] for m in months], values=[series[year][m] for m in months],
+                labels=[MONTHS_SHORT[m] if m else "Без месяца" for m in months], values=[series[year][m] for m in months],
                 base_values=[series[baseline][m] for m in months],
                 groups=[dict(label=label, current=groups[year][k], previous=groups[baseline][k],
                              delta=groups[year][k]-groups[baseline][k]) for k,label in Expense.Kind.choices])
@@ -74,6 +79,8 @@ def dashboard(rows, year, month=None, category=""):
             else:
                 payments[payer] += value
         key = (entry.period.month if year else entry.period.year) if entry.period else 0
+        if not entry.period and not year:
+            key = entry.year_only or 0
         timeline[key][entry.kind] += entry.amount
     total = sum(groups.values())
     peak = max((sum(series.values()) for series in timeline.values()), default=0)

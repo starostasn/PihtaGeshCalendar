@@ -710,6 +710,7 @@ class Expense(models.Model):
     amount = models.DecimalField("Сумма, ₽", max_digits=14, decimal_places=2,
                                  validators=[MinValueValidator(0)])
     period = models.DateField("Месяц расхода", blank=True, null=True, db_index=True)
+    year_only = models.PositiveSmallIntegerField("Год при неизвестном месяце", blank=True, null=True)
     paid = models.DateField("Дата оплаты", blank=True, null=True)
     funding = models.TextField("Кто оплатил", blank=True)
     state = models.CharField(max_length=8, choices=State.choices, default=State.DRAFT)

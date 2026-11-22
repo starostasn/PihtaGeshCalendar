@@ -7,7 +7,7 @@ from zipfile import BadZipFile
 from django import forms
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -148,6 +148,7 @@ def selected_year(request):
 
 def expense_years(rows, selected=None):
     years = {d.year for d in rows.dates("period", "year")}
+    years.update(rows.filter(period__isnull=True, year_only__isnull=False).values_list("year_only", flat=True))
     years.add(timezone.localdate().year)
     if selected:
         years.add(selected)
@@ -183,7 +184,7 @@ def overview(request):
         rows = rows.filter(category=category)
     comparison_rows = rows
     if year:
-        rows = rows.filter(period__year=year)
+        rows = rows.filter(Q(period__year=year) | Q(period__isnull=True, year_only=year))
     if request.method == "POST":
         if tab in ("report", "stats"):
             return HttpResponseBadRequest()
@@ -250,7 +251,10 @@ def stage(upload):
         if record["period"] and entry.period != record["period"] and entry.period in (None, old_payment_month):
             entry.period = record["period"]
             fields.append("period")
-        if entry.state == Expense.State.DRAFT and (entry.amount > 0 or has_refund(entry.funding)) and entry.period:
+        if not entry.period and record["year_only"] and entry.year_only != record["year_only"]:
+            entry.year_only = record["year_only"]
+            fields.append("year_only")
+        if entry.state == Expense.State.DRAFT and (entry.amount > 0 or has_refund(entry.funding)) and (entry.period or entry.year_only):
             entry.state = Expense.State.POSTED
             confirmed += 1
             fields.append("state")
@@ -268,7 +272,7 @@ def review(request):
     year = selected_year(request)
     years = expense_years(rows, year)
     if year:
-        rows = rows.filter(period__year=year)
+        rows = rows.filter(Q(period__year=year) | Q(period__isnull=True, year_only=year))
     if request.method == "POST":
         if "action" in request.POST:
             return bulk_action(request, rows, allow_confirm=state == "draft")

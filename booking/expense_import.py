@@ -72,7 +72,8 @@ def parse_workbook(upload):
                 if not any(v for _, v in amounts) and not total:
                     notes += "Проверить наличие оплаты. "
                 yield dict(source=f"{sheet.title} · {index}", original=notes + f"Сумма строки: {total}",
-                           period=period, paid=paid, amount=total,
+                           period=period, year_only=2018 if preliminary and not raw_date else None,
+                           paid=paid, amount=total,
                            funding=", ".join(f"{k}: {v}" for k,v in amounts),
                            description=str(row[2]), category="Без категории",
                            kind="build" if preliminary or year and year <= 2023 else "run")
