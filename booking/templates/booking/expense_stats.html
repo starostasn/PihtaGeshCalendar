@@ -1,0 +1,61 @@
+{% extends "booking/base.html" %}
+{% load static %}
+{% block title %}Статистика расходов{% endblock %}
+{% block content %}
+<div class="cal-head"><h1>Статистика расходов</h1>
+  <span class="muted">{{ year|default:"Все годы" }}{% if comparison %} · сравнение: {{ baseline }}{% endif %}</span>
+</div>
+{% include "booking/_expense_nav.html" %}
+<form class="filters" method="get" id="expenseFilters">
+  <input type="hidden" name="tab" value="stats">
+{% include "booking/_expense_years.html" with field="year" selected=year empty_label="Все годы" %}
+  <select name="month" aria-label="Месяц"><option value="">Все месяцы</option>{% for n,label in months %}<option value="{{ n }}" {% if month == n|stringformat:"s" %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="category" aria-label="Статья"><option value="">Все статьи</option>{% for c in categories %}<option {% if c == category %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+  <button class="btn small primary">Показать</button>
+</form>
+<section class="kpis" aria-label="Главные показатели">
+  <div class="kpi hero"><span class="kpi-label">Всего расходов</span><span class="kpi-value">{{ dashboard.total|floatformat:"2g" }} ₽</span><span class="kpi-sub">подтверждённые расходы за период</span></div>
+  {% for g in dashboard.groups %}<div class="kpi"><span class="kpi-label">{{ g.label }}</span><span class="kpi-value">{{ g.amount|floatformat:"2g" }} ₽</span><span class="kpi-sub">{{ g.percent|floatformat:"-1" }}% расходов</span></div>{% endfor %}
+  <div class="kpi"><span class="kpi-label">Записи</span><span class="kpi-value">{{ dashboard.count }}</span><span class="kpi-sub">подтверждено за период</span></div>
+</section>
+{% if dashboard.count or dashboard.payers %}
+<section class="charts">
+  <figure class="card chart-card"><figcaption><h2>Расходы по {% if year %}месяцам{% else %}годам{% endif %}</h2><span class="muted small">Суммы по группам</span></figcaption>
+    <div class="chart-box"><canvas id="expense-trend" role="img" aria-label="Динамика расходов по группам"></canvas></div>
+    <details><summary>Таблица</summary><div class="scroll-x"><table class="list small"><tr><th>Период</th>{% for part in dashboard.trend.0.parts %}<th class="num">{{ part.label }}</th>{% endfor %}<th class="num">Итого</th></tr>
+    {% for r in dashboard.trend %}<tr><td>{{ r.label }}</td>{% for p in r.parts %}<td class="num">{{ p.amount|floatformat:"2g" }} ₽</td>{% endfor %}<td class="num">{{ r.total|floatformat:"2g" }} ₽</td></tr>{% endfor %}</table></div></details>
+  </figure>
+  <figure class="card chart-card"><figcaption><h2>Структура расходов</h2><span class="muted small">Доля каждой группы за период</span></figcaption>
+    {% if dashboard.total %}<div class="chart-box"><canvas id="expense-mix" role="img" aria-label="Доли групп расходов"></canvas></div>
+    {% include "booking/_expense_distribution.html" with items=dashboard.groups %}{% else %}<p class="muted">Расходов за период нет.</p>{% endif %}
+  </figure>
+  <figure class="card chart-card"><figcaption><h2>Кто сколько оплатил</h2><span class="muted small">Оплаты, взносы в копилку и возвраты</span></figcaption>
+    <div class="chart-box"><canvas id="expense-funders" role="img" aria-label="Суммы по плательщикам"></canvas></div>
+    <div class="scroll-x"><table class="list small"><tr><th>Плательщик</th><th class="num">Оплаты, ₽</th><th class="num">Возвраты, ₽</th><th class="num">Взносы, ₽</th><th class="num">Итого, ₽</th></tr>
+    {% for p in dashboard.payers %}<tr><td>{{ p.label }}</td><td class="num">{{ p.paid|floatformat:"2g" }}</td><td class="num">{{ p.refunds|floatformat:"2g" }}</td><td class="num">{{ p.deposits|floatformat:"2g" }}</td><td class="num">{{ p.amount|floatformat:"2g" }}</td></tr>{% endfor %}</table></div>
+  </figure>
+  <figure class="card chart-card"><figcaption><h2>Расходы по статьям</h2><span class="muted small">Крупнейшие статьи за период</span></figcaption>
+    <div class="chart-box"><canvas id="expense-categories" role="img" aria-label="До десяти крупнейших статей расходов"></canvas></div>
+    {% include "booking/_expense_distribution.html" with items=dashboard.categories %}
+  </figure>
+</section>
+{% else %}<p class="muted">По выбранным фильтрам подтверждённых расходов нет.</p>{% endif %}
+<section class="card compare"><div class="compare-head"><div><h2>Сравнение лет</h2><span class="muted small">Расходы за одинаковые месяцы с учётом выбранной статьи</span></div>
+  <div class="compare-controls"><span>Сравнить с</span>{% include "booking/_expense_years.html" with field="compare" selected=baseline empty_label="Без сравнения" form_id="expenseFilters" caption="Год сравнения" %}
+  <button form="expenseFilters" class="btn small">Показать</button></div></div>
+  {% if comparison %}<div class="chart-box chart-tall"><canvas id="expense-comparison" role="img" aria-label="Сравнение расходов по месяцам"></canvas></div>
+  <div class="scroll-x"><table class="list small"><tr><th>Группа</th><th class="num">{{ comparison.year }}, ₽</th><th class="num">{{ baseline }}, ₽</th><th class="num">Изменение, ₽</th></tr>
+  {% for g in comparison.groups %}<tr><td>{{ g.label }}</td><td class="num">{{ g.current|floatformat:"2g" }}</td><td class="num">{{ g.previous|floatformat:"2g" }}</td><td class="num">{{ g.delta|floatformat:"2g" }}</td></tr>{% endfor %}
+  <tr><th>Итого</th><th class="num">{{ comparison.current|floatformat:"2g" }}</th><th class="num">{{ comparison.previous|floatformat:"2g" }}</th><th class="num">{{ comparison.delta|floatformat:"2g" }}{% if comparison.percent != None %} ({{ comparison.percent|floatformat:"1" }}%){% endif %}</th></tr></table></div>
+  {{ comparison|json_script:"expense-comparison-data" }}{% elif baseline %}<p class="muted">Выберите два разных года.</p>{% endif %}
+</section>
+{{ dashboard.groups|json_script:"expense-mix-data" }}
+{{ dashboard.payers|json_script:"expense-funders-data" }}
+{{ dashboard.trend|json_script:"expense-trend-data" }}
+{{ dashboard.categories|json_script:"expense-categories-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'booking/expense-years.js' %}"></script>
+<script src="{% static 'booking/vendor/chart.umd.min.js' %}"></script>
+<script src="{% static 'booking/expense-charts.js' %}"></script>
+{% endblock %}

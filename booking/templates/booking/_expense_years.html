@@ -1,0 +1,4 @@
+<div class="chips" role="radiogroup" aria-label="{{ caption|default:'Год' }}">
+  {% if empty_label %}<label class="chip"><input type="radio" name="{{ field }}" value="" {% if not selected %}checked{% endif %} {% if form_id %}form="{{ form_id }}"{% endif %}><span>{{ empty_label }}</span></label>{% endif %}
+  {% for y in years %}<label class="chip"><input type="radio" name="{{ field }}" value="{{ y }}" {% if y == selected %}checked{% endif %} {% if form_id %}form="{{ form_id }}"{% endif %}><span>{{ y }}</span></label>{% endfor %}
+</div>

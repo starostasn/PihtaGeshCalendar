@@ -1,0 +1,6 @@
+<nav class="filters" aria-label="Разделы расходов"><a class="btn {% if tab == 'stats' %}primary{% endif %}" href="{% url 'expenses' %}">Статистика расходов</a>
+<a class="btn {% if tab == 'build' %}primary{% endif %}" href="{% url 'expenses' %}?tab=build">Строительство</a>
+<a class="btn {% if tab == 'run' %}primary{% endif %}" href="{% url 'expenses' %}?tab=run">Содержание</a>
+<a class="btn {% if tab == 'report' %}primary{% endif %}" href="{% url 'expenses' %}?tab=report">Результат аренды</a>
+
+<a class="btn {% if tab == 'import' %}primary{% endif %}" href="{% url 'expense_import' %}">Импорт и сверка{% if pending %} ({{ pending }}){% endif %}</a></nav>

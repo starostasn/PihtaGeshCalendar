@@ -684,3 +684,37 @@ class AvitoAccount(models.Model):
     @property
     def is_ready(self) -> bool:
         return self.is_connected and bool(self.user_id and self.item_id)
+
+
+class PayerContribution(models.Model):
+    payer = models.CharField(max_length=120)
+    paid = models.DateField()
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    source = models.CharField(max_length=150, unique=True)
+
+
+class Expense(models.Model):
+    class Kind(models.TextChoices):
+        BUILD = "build", "Строительство"
+        RUN = "run", "Содержание"
+        TAX = "tax", "Налог на аренду"
+
+    class State(models.TextChoices):
+        DRAFT = "draft", "На сверке"
+        POSTED = "posted", "Учтено"
+        SKIPPED = "skipped", "Пропущено"
+
+    kind = models.CharField("Раздел", max_length=8, choices=Kind.choices)
+    category = models.CharField("Статья", max_length=120)
+    description = models.TextField("Назначение")
+    amount = models.DecimalField("Сумма, ₽", max_digits=14, decimal_places=2,
+                                 validators=[MinValueValidator(0)])
+    period = models.DateField("Месяц расхода", blank=True, null=True, db_index=True)
+    paid = models.DateField("Дата оплаты", blank=True, null=True)
+    funding = models.TextField("Кто оплатил", blank=True)
+    state = models.CharField(max_length=8, choices=State.choices, default=State.DRAFT)
+    source = models.CharField(max_length=150, null=True, blank=True, unique=True)
+    original = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-period", "-paid", "pk"]

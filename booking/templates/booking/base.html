@@ -26,17 +26,18 @@
   <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mainNav">☰ Меню</button>
   <nav id="mainNav" aria-label="Разделы">
     {% with u=request.resolver_match.url_name %}
-    <a href="{% url 'calendar' %}" class="{% if u == 'calendar' %}active{% endif %}">Календарь</a>
-    <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}">Брони</a>
-    <a href="{% url 'guests' %}" class="{% if u == 'guests' or u == 'guest_edit' or u == 'guest_create' %}active{% endif %}">Гости</a>
-    <a href="{% url 'house' %}" class="{% if u == 'house' or u == 'house_edit' %}active{% endif %}">О доме</a>
-    <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}">Цены</a>
-    <a href="{% url 'stats' %}" class="{% if u == 'stats' %}active{% endif %}">Статистика</a>
+    <a href="{% url 'calendar' %}" class="{% if u == 'calendar' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/calendar.svg' %}" alt="" width="24" height="24">Календарь</a>
+    <a href="{% url 'booking_list' %}" class="{% if u == 'booking_list' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/booking_list.svg' %}" alt="" width="24" height="24">Брони</a>
+    <a href="{% url 'guests' %}" class="{% if u == 'guests' or u == 'guest_edit' or u == 'guest_create' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/guests.svg' %}" alt="" width="24" height="24">Гости</a>
+    <a href="{% url 'house' %}" class="{% if u == 'house' or u == 'house_edit' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/house.svg' %}" alt="" width="24" height="24">О доме</a>
+    <a href="{% url 'prices' %}" class="{% if u == 'prices' or u == 'rule_edit' or u == 'rule_create' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/prices.svg' %}" alt="" width="24" height="24">Цены</a>
+    <a href="{% url 'stats' %}" class="{% if u == 'stats' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/stats.svg' %}" alt="" width="24" height="24">Статистика</a>
     {% if is_admin %}
-    <a href="{% url 'channels' %}" class="{% if u == 'channels' or u == 'channel_edit' or u == 'channel_create' %}active{% endif %}">Площадки</a>
-    <a href="{% url 'users' %}" class="{% if u == 'users' or u == 'user_edit' or u == 'user_create' %}active{% endif %}">Пользователи</a>
+    <a href="{% url 'expenses' %}" class="{% if u == 'expenses' or u == 'expense_edit' or u == 'expense_new' or u == 'expense_import' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/expenses.svg' %}" alt="" width="24" height="24">Расходы</a>
+    <a href="{% url 'channels' %}" class="{% if u == 'channels' or u == 'channel_edit' or u == 'channel_create' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/channels.svg' %}" alt="" width="24" height="24">Площадки</a>
+    <a href="{% url 'users' %}" class="{% if u == 'users' or u == 'user_edit' or u == 'user_create' %}active{% endif %}"><img class="section-icon" src="{% static 'booking/brand/sections/users.svg' %}" alt="" width="24" height="24">Пользователи</a>
     {% endif %}
-    <a href="{% url 'account' %}" class="me{% if u == 'account' %} active{% endif %}" title="{{ me_role }} · профиль и пароль">👤 {{ me_name }}</a>
+    <a href="{% url 'account' %}" class="me{% if u == 'account' %} active{% endif %}" title="{{ me_role }} · профиль и пароль"><img class="section-icon" src="{% static 'booking/brand/sections/account.svg' %}" alt="" width="24" height="24">{{ me_name }}</a>
     {% endwith %}
     <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" title="Выйти">Выйти</button></form>
   </nav>

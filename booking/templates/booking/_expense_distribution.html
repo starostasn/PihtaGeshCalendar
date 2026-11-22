@@ -1,0 +1,4 @@
+<details><summary>Таблица</summary><div class="scroll-x">
+  <table class="list small"><tr><th>Название</th><th class="num">Сумма</th><th class="num">Доля</th></tr>
+  {% for row in items %}<tr><td>{{ row.label }}</td><td class="num">{{ row.amount|floatformat:"2g" }} ₽</td><td class="num">{{ row.percent|floatformat:"-1" }}%</td></tr>{% endfor %}</table>
+</div></details>

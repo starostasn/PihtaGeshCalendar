@@ -128,6 +128,8 @@ h2 { font-size: 18px; margin: 24px 0 10px; }
   background: none; border: 0; font: inherit; cursor: pointer;
 }
 .topbar nav a.active { background: var(--sel); }
+.topbar nav a { display: inline-flex; align-items: center; gap: 5px; }
+.topbar nav .section-icon { width: 22px; height: 22px; flex: none; }
 /* на телефоне меню прячется под кнопку (это правило должно идти после общего) */
 @media (max-width: 1040px) {
   .nav-toggle { display: inline-flex; gap: 6px; align-items: center; }

@@ -1,0 +1,13 @@
+<form id="expense-actions" class="filters" method="post">
+  {% csrf_token %}
+  <label>Перенести отмеченные в
+    <select name="target_kind">
+      <option value="">Текущая группа</option>
+      <option value="build">Строительство</option>
+      <option value="run">Содержание</option>
+      <option value="tax">Налог на аренду</option>
+    </select>
+  </label>
+  <label>Статья <input name="target_category" maxlength="120" placeholder="Оставить прежнюю"></label>
+  <button class="btn" name="action" value="move">Перенести отмеченные</button>
+</form>

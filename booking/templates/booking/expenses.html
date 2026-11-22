@@ -1,0 +1,30 @@
+{% extends "booking/base.html" %}
+{% load static %}
+{% block title %}Расходы{% endblock %}
+{% block content %}
+<div class="cal-head"><h1>{% if tab == 'build' %}Строительство{% elif tab == 'run' %}Содержание и налоги{% else %}Результат аренды{% endif %}</h1>{% if tab != 'report' %}<a class="btn primary" href="{% url 'expense_new' %}?kind={{ tab }}">Добавить расход</a>{% endif %}</div>
+{% include "booking/_expense_nav.html" %}
+<form class="filters" method="get"><input type="hidden" name="tab" value="{{ tab }}">
+{% if tab == "report" %}{% include "booking/_expense_years.html" with field="year" selected=year %}{% else %}{% include "booking/_expense_years.html" with field="year" selected=year empty_label="Все годы" %}{% endif %}
+{% if tab != 'report' %}<label>Месяц <select name="month"><option value="">Все месяцы</option>{% for n,label in months %}<option value="{{ n }}" {% if month == n|stringformat:"s" %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endif %}
+{% if tab != 'report' %}<label>Статья <select name="category"><option value="">Все статьи</option>{% for c in categories %}<option {% if c == category %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>{% endif %}
+<button class="btn small primary">Показать</button></form>
+{% if tab == 'report' %}
+{% if pending %}<div class="msg warning">На сверке {{ pending }} записей. Суммы предварительные.</div>{% endif %}
+<section class="kpis"><div class="kpi hero"><span class="kpi-label">Осталось окупить</span><span class="kpi-value">{% if remaining != None %}{{ remaining|floatformat:"2g" }} ₽{% else %}—{% endif %}</span><span class="kpi-sub">к началу текущего месяца</span></div></section>
+{% if remaining == None %}<p class="muted small">Для расчёта окупаемости нужны подтверждённые вложения, завершённая сверка и налог за месяцы деятельности.</p>{% endif %}
+<section class="card compare"><div class="compare-head"><div><h2>Доходы и расходы за {{ year }} год</h2><span class="muted small">Выручка и комиссии распределены по ночам подтверждённых броней. Прочерк в графе налога означает, что налог за месяц ещё не указан.</span></div></div>
+<div class="scroll-x"><table class="list small"><tr><th>Месяц</th><th>Ночей</th><th>Выручка, ₽</th><th>Содержание, ₽</th><th>Себестоимость ночи, ₽</th><th>Комиссии, ₽</th><th>Прибыль до налога, ₽</th><th>Налог, ₽</th><th>Чистая прибыль, ₽</th></tr>
+{% for r in report %}<tr><td>{{ r.label }}</td><td class="num">{{ r.nights }}</td><td class="num">{{ r.revenue }}</td><td class="num">{{ r.costs }}</td><td class="num">{{ r.unit|default_if_none:"—" }}</td><td class="num">{{ r.commission }}</td><td class="num">{{ r.profit }}</td><td class="num">{{ r.tax|default_if_none:"—" }}</td><td class="num">{{ r.net|default_if_none:"—" }}</td></tr>{% endfor %}</table></div>
+{% else %}
+<section class="kpis"><div class="kpi hero"><span class="kpi-label">Расходы по фильтру</span><span class="kpi-value">{{ total|floatformat:"2g" }} ₽</span></div>
+{% if tab == 'build' %}<div class="kpi"><span class="kpi-label">Все вложения</span><span class="kpi-value">{{ invested|floatformat:"2g" }} ₽</span></div>{% endif %}
+<div class="kpi"><span class="kpi-label">Записи</span><span class="kpi-value">{{ rows|length }}</span></div></section>
+{% if groups %}<section class="card chart-card"><h2>По статьям</h2><details><summary>Таблица</summary><table class="list small"><tr><th>Статья</th><th class="num">Сумма</th></tr>{% for g in groups %}<tr><td>{{ g.category }}</td><td class="num">{{ g.total|floatformat:"2g" }} ₽</td></tr>{% endfor %}</table></details></section>{% endif %}
+<section class="card compare"><div class="compare-head"><h2>Журнал расходов</h2></div>
+{% if rows %}{% include "booking/_expense_actions.html" %}{% endif %}
+<div class="scroll-x"><table class="list small"><tr><th>Выбор</th><th>Месяц</th><th>Оплачено</th><th>Назначение</th><th>Статья</th><th>Кто оплатил</th><th>Сумма, ₽</th></tr>
+{% for e in rows %}<tr><td><input form="expense-actions" type="checkbox" name="expense_id" value="{{ e.pk }}" aria-label="Выбрать: {{ e.description }}"></td><td>{{ e.period|date:"m.Y"|default:"—" }}</td><td>{{ e.paid|date:"d.m.Y"|default:"—" }}</td><td><a href="{% url 'expense_edit' e.pk %}">{{ e.description }}</a></td><td>{{ e.category }}</td><td>{{ e.funding }}</td><td class="num">{{ e.amount|floatformat:"2g" }}</td></tr>{% empty %}<tr><td colspan="7">Учтённых расходов по этому фильтру пока нет.</td></tr>{% endfor %}</table></div>
+{% endif %}</section>{% endblock %}
+
+{% block scripts %}<script src="{% static 'booking/expense-years.js' %}"></script>{% endblock %}
